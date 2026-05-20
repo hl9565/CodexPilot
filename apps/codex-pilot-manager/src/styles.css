@@ -15,6 +15,11 @@ body {
   overflow-x: hidden;
 }
 
+body.uiPreviewMode {
+  background: #dfe4ea;
+  overflow: auto;
+}
+
 button {
   font: inherit;
 }
@@ -60,6 +65,28 @@ input[type="checkbox"] {
   grid-template-columns: 212px 1fr;
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+.previewStage {
+  align-items: center;
+  display: grid;
+  min-height: 100vh;
+  min-width: 1120px;
+  padding: 32px;
+  place-items: center;
+}
+
+.previewWindow {
+  background: #f5f6f8;
+  border: 1px solid #b8c3d2;
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.22);
+  height: 760px;
+  overflow: auto;
+  width: 1120px;
+}
+
+.previewWindow .shell {
+  min-height: 760px;
 }
 
 .sidebar {

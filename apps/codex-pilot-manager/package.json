@@ -9,6 +9,7 @@
     "check": "tsc --noEmit -p tsconfig.json",
     "tauri": "tauri",
     "vite:dev": "vite --host 127.0.0.1 --port 1420",
+    "preview:ui": "vite --host 127.0.0.1 --port 1420 --mode ui-preview",
     "vite:build": "vite build"
   },
   "dependencies": {

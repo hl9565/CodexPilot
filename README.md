@@ -6,6 +6,8 @@ CodexPilot 不修改 Codex App 安装目录。
 
 > CodexPilot 是非官方工具，不隶属于 OpenAI 或 Codex App。
 
+![CodexPilot manager UI preview](assets/screenshots/manager-ui-preview.png)
+
 ## 它能做什么
 
 - 从桌面管理器启动 Codex，并注入 CodexPilot 操作菜单。
@@ -171,6 +173,17 @@ cd apps/codex-pilot-manager
 npm install
 npm run check
 ```
+
+### 管理器 UI 预览
+
+改管理器界面时，可以直接在浏览器里打开开发期预览，不需要启动完整 Tauri 桌面壳：
+
+```bash
+cd apps/codex-pilot-manager
+npm run preview:ui
+```
+
+然后打开 `http://127.0.0.1:1420`。预览模式会使用本地 mock 数据，覆盖启动、模型通道、回收站和诊断页面；外层窗口默认使用真实 App 配置里的 `1120x760` 尺寸，方便检查 UI 在实际桌面窗口中的表现。
 
 ## 发布前检查
 

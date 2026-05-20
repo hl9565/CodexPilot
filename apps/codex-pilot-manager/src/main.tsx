@@ -1,6 +1,5 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
 import {
   Activity,
   BadgeCheck,
@@ -23,6 +22,7 @@ import {
   RotateCcw,
   Plus,
 } from "lucide-react";
+import { callBackend, isUiPreviewMode } from "./backend";
 import "./styles.css";
 
 type BackendStatus = {
@@ -150,19 +150,19 @@ function App() {
   const refresh = React.useCallback((silent = false) => {
     if (!silent) notify("正在刷新");
     Promise.all([
-      invoke<BackendStatus | null>("backend_status")
+      callBackend<BackendStatus | null>("backend_status")
         .then(setStatus)
         .catch(() => setStatus(null)),
-      invoke<LaunchSnapshot>("launch_snapshot")
+      callBackend<LaunchSnapshot>("launch_snapshot")
         .then(setLaunch)
         .catch(() => setLaunch(null)),
-      invoke<ProviderSnapshot>("provider_snapshot")
+      callBackend<ProviderSnapshot>("provider_snapshot")
         .then(setProvider)
         .catch(() => setProvider(null)),
-      invoke<RecycleBinSnapshot>("recycle_bin_snapshot")
+      callBackend<RecycleBinSnapshot>("recycle_bin_snapshot")
         .then(setRecycleBin)
         .catch(() => setRecycleBin(null)),
-      invoke<DiagnosticsSnapshot>("diagnostics_snapshot")
+      callBackend<DiagnosticsSnapshot>("diagnostics_snapshot")
         .then(setDiagnostics)
         .catch(() => setDiagnostics(null)),
     ]).finally(() => {
@@ -189,7 +189,7 @@ function App() {
   }, [refresh]);
 
   React.useEffect(() => {
-    invoke<string>("app_version")
+    callBackend<string>("app_version")
       .then(setAppVersion)
       .catch(() => setAppVersion(null));
   }, []);
@@ -222,7 +222,7 @@ function App() {
     setLaunching(true);
     setProgressMessage(progress);
     notify(progress);
-    invoke<string>(command)
+    callBackend<string>(command)
       .then((value) => {
         notify(value);
         refresh();
@@ -463,7 +463,7 @@ function LaunchView({
       setSaveMessage("调试端口和后端端口不能相同");
       return;
     }
-    invoke<string>("save_launch_preferences", {
+    callBackend<string>("save_launch_preferences", {
       request: {
         appPath,
         debugPort: debug,
@@ -607,7 +607,7 @@ function ProviderView({
     setPendingAction("save");
     onProgress("正在保存混合中转");
     onMessage("正在保存混合中转");
-    invoke<ProviderProfileSaveResponse>("save_provider_profile", {
+    callBackend<ProviderProfileSaveResponse>("save_provider_profile", {
       request: {
         id: editingId || null,
         name: profileName,
@@ -621,7 +621,7 @@ function ProviderView({
         setEditingId(saveResult.id);
         setIsCreatingProfile(false);
         onMessage(saveResult.message);
-        return invoke<string>("apply_provider", {
+        return callBackend<string>("apply_provider", {
           request: {
             profileId: saveResult.id,
             mode: "hybridApi",
@@ -650,7 +650,7 @@ function ProviderView({
   };
 
   const selectProfile = (profile: ProviderProfile) => {
-    invoke<string>("activate_provider_profile", { request: { id: profile.id } })
+    callBackend<string>("activate_provider_profile", { request: { id: profile.id } })
       .then((message) => {
         setEditingId(profile.id);
         setProfileName(profile.name);
@@ -672,7 +672,7 @@ function ProviderView({
     if (!window.confirm(`确定删除“${name}”？删除后会自动切换到其他配置档。`)) {
       return;
     }
-    invoke<string>("delete_provider_profile", { request: { id: editingId } })
+    callBackend<string>("delete_provider_profile", { request: { id: editingId } })
       .then((message) => {
         onMessage(message);
         setEditingId("");
@@ -687,7 +687,7 @@ function ProviderView({
     setPendingAction("clear");
     onProgress("正在保存官方通道");
     onMessage("正在保存官方通道");
-    invoke<string>("clear_provider")
+    callBackend<string>("clear_provider")
       .then((message) => {
         onMessage(message);
         onRefresh();
@@ -917,7 +917,7 @@ function RecycleBinView({
     setPendingAction("restore");
     onProgress("正在恢复回收站会话");
     onMessage(`正在恢复 ${tokens.length} 条会话`);
-    invoke<string>("restore_recycle_bin_entries", { request: { tokens } })
+    callBackend<string>("restore_recycle_bin_entries", { request: { tokens } })
       .then((message) => {
         onMessage(message);
         setSelected([]);
@@ -937,7 +937,7 @@ function RecycleBinView({
     setPendingAction("delete");
     onProgress("正在永久删除回收站记录");
     onMessage(`正在永久删除 ${selected.length} 条记录`);
-    invoke<string>("delete_recycle_bin_entries", { request: { tokens: selected } })
+    callBackend<string>("delete_recycle_bin_entries", { request: { tokens: selected } })
       .then((message) => {
         onMessage(message);
         setSelected([]);
@@ -1053,7 +1053,7 @@ function DiagnosticsView({
   const collectDiagnostics = () => {
     setLogMessage("正在生成诊断快照");
     onProgress("正在生成诊断快照");
-    invoke<string>("collect_diagnostics")
+    callBackend<string>("collect_diagnostics")
       .then((message) => {
         setLogMessage(message);
         onMessage(message);
@@ -1184,8 +1184,24 @@ function ProgressDialog({ message }: { message: string }) {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+if (isUiPreviewMode) {
+  document.body.classList.add("uiPreviewMode");
+}
+
+const app = (
   <React.StrictMode>
     <App />
   </React.StrictMode>
+);
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  isUiPreviewMode ? (
+    <div className="previewStage">
+      <div className="previewWindow" aria-label="CodexPilot 1120 by 760 preview">
+        {app}
+      </div>
+    </div>
+  ) : (
+    app
+  ),
 );
