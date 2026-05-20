@@ -256,9 +256,9 @@ macOS 安装包由维护者在本地发布环境中构建，并按需上传到 G
 
 CodexPilot 依赖 Codex App 的页面结构和本地数据格式。Codex App 更新后，如果页面结构、会话数据库或配置格式发生变化，可能需要更新 CodexPilot 的页面连接脚本或同步逻辑。
 
-## 友情链接
+## 社区
 
-- [LINUX DO](https://linux.do)
+本项目链接并认可 [LINUX DO](https://linux.do/) 社区。欢迎在社区讨论帖中反馈问题、分享使用体验或提出改进建议。
 
 ## License
 

@@ -252,9 +252,9 @@ If you want to package it yourself, follow the official Tauri, Rust, and Node.js
 
 CodexPilot depends on Codex App's page structure and local data format. If Codex App changes its renderer structure, session database, or configuration format, CodexPilot may need updates to its page connection scripts or sync logic.
 
-## Friendly Links
+## Community
 
-- [LINUX DO](https://linux.do)
+This project links back to and recognizes the [LINUX DO](https://linux.do/) community. Feedback, usage notes, and improvement ideas are welcome in the community discussion thread.
 
 ## License
 
