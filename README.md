@@ -52,7 +52,7 @@ macOS 当前包未做 Apple Developer ID 签名和公证。如果系统提示无
 
 切换模型通道后，历史会话可能因为 Provider 元数据不一致而不可见或分组异常。CodexPilot 不会自动改写历史数据；你可以在“对话维护”里先预览影响范围，再手动把会话归属同步到选定 Provider。
 
-![CodexPilot 对话维护页面](docs/images/readme-recycle-bin.png)
+![CodexPilot 对话维护页面](docs/images/readme-dialog-maintenance.png)
 
 ## 其他功能
 

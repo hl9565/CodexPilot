@@ -32,7 +32,7 @@ CodexPilot can add extra actions to regular and archived sessions:
 
 Delete and restore operations read and write the local Codex session database. CodexPilot keeps recoverable backups where possible, but you should still review session contents before batch cleanup.
 
-![CodexPilot dialog maintenance page](images/readme-recycle-bin.png)
+![CodexPilot dialog maintenance page](images/readme-dialog-maintenance.png)
 
 ## Model Channel
 

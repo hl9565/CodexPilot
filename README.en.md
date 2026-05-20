@@ -54,7 +54,7 @@ The custom Provider receives those model requests, so its privacy, billing, and 
 
 After switching model channels, historical sessions may disappear or group incorrectly because their Provider metadata no longer matches. CodexPilot does not rewrite historical data automatically; in Dialog Maintenance, you can preview the impact first, then manually sync session ownership to the selected Provider.
 
-![CodexPilot dialog maintenance page](docs/images/readme-recycle-bin.png)
+![CodexPilot dialog maintenance page](docs/images/readme-dialog-maintenance.png)
 
 ## Other Features
 

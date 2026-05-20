@@ -32,7 +32,7 @@ CodexPilot 可以在普通会话和归档会话中提供额外操作：
 
 删除和恢复操作会读写本机 Codex 的会话数据库。CodexPilot 会尽量保留可恢复备份，但仍建议在批量清理前确认会话内容已经不再需要。
 
-![CodexPilot 对话维护页面](images/readme-recycle-bin.png)
+![CodexPilot 对话维护页面](images/readme-dialog-maintenance.png)
 
 ## 模型通道
 
