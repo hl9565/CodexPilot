@@ -23,6 +23,7 @@ class MiniElement {
     this.id = "";
     this.title = "";
     this.style = {};
+    this.offsetTop = 0;
     this.scrollTop = 0;
     this.scrollHeight = 1200;
     this.clientHeight = 420;
@@ -146,7 +147,11 @@ class MiniElement {
   }
 
   getBoundingClientRect() {
-    return { width: 180, height: 32 };
+    return {
+      width: 180,
+      height: this.hidden ? 0 : 32,
+      top: this.offsetTop || 0
+    };
   }
 
   scrollIntoView(options) {
@@ -223,21 +228,42 @@ function makeThreadRow(id, title, selected = false) {
 
 const source = fs.readFileSync(new URL("../assets/inject/renderer-inject.js", import.meta.url), "utf8");
 
-function createFixture({ includeOther = true } = {}) {
+function makeMessage({ text, role = "user", testId = "", className = "", offsetTop = 0 }) {
+  const message = new MiniElement("article");
+  if (role) message.setAttribute("data-message-author-role", role);
+  if (testId) message.setAttribute("data-testid", testId);
+  if (className) message.className = className;
+  message.offsetTop = offsetTop;
+  message.textContent = text;
+  return message;
+}
+
+function createFixture({ includeOther = true, messages } = {}) {
   const document = new MiniDocument();
   const selected = makeThreadRow("thread-selected-12345", "测试对话", true);
   const other = includeOther ? makeThreadRow("thread-other-12345", "其他对话", false) : null;
-  const userMessageOne = new MiniElement("article");
-  userMessageOne.setAttribute("data-message-author-role", "user");
-  userMessageOne.textContent = "请帮我解释这段代码";
-  const userMessageTwo = new MiniElement("article");
-  userMessageTwo.setAttribute("data-message-author-role", "user");
-  userMessageTwo.textContent = "再帮我补一个测试";
-  document.body.append(...[selected.listItem, other?.listItem, userMessageOne, userMessageTwo].filter(Boolean));
+  const threadMessages = messages || [
+    makeMessage({ text: "请帮我解释这段代码", offsetTop: 120 }),
+    makeMessage({ text: "再帮我补一个测试", offsetTop: 760 })
+  ];
+  document.body.append(...[selected.listItem, other?.listItem, ...threadMessages].filter(Boolean));
 
   const bridgeCalls = [];
   const confirmMessages = [];
   const storage = new Map();
+  const mutationObservers = [];
+  class FixtureMutationObserver {
+    constructor(callback) {
+      this.callback = callback;
+      mutationObservers.push(this);
+    }
+
+    observe() {}
+
+    trigger() {
+      this.callback([]);
+    }
+  }
   const context = {
     console: { info() {} },
     setTimeout(callback, delay = 0) {
@@ -245,6 +271,7 @@ function createFixture({ includeOther = true } = {}) {
       return 1;
     },
     Blob: class {},
+    MutationObserver: FixtureMutationObserver,
     URL: FixtureURL,
     document,
     history: {
@@ -314,7 +341,7 @@ function createFixture({ includeOther = true } = {}) {
   context.window.document = document;
   context.window.history = context.history;
   vm.runInNewContext(source, context, { filename: "renderer-inject.js" });
-  return { bridgeCalls, confirmMessages, context, document, other, selected, userMessageOne };
+  return { bridgeCalls, confirmMessages, context, document, messages: threadMessages, mutationObservers, other, selected };
 }
 
 async function deleteSelected(fixture) {
@@ -327,7 +354,7 @@ async function deleteSelected(fixture) {
 
 {
   const fixture = createFixture();
-  const { bridgeCalls, confirmMessages, document, other, selected, userMessageOne } = fixture;
+  const { bridgeCalls, confirmMessages, document, messages, other, selected } = fixture;
   const root = document.getElementById("codex-pilot-root");
   assert.ok(root, "应创建 CodexPilot 浮动菜单");
   assert.equal(root.dataset.status, "unknown");
@@ -372,8 +399,9 @@ async function deleteSelected(fixture) {
   assert.ok(timeline, "应为长对话创建时间线");
   const markers = timeline.querySelectorAll(".codex-pilot-timeline-marker");
   assert.equal(markers.length, 2, "应为两个用户问题创建时间线标记");
+  assert.equal(markers[0].querySelector(".codex-pilot-timeline-tooltip").textContent, "请帮我解释这段代码");
   await markers[0].click();
-  assert.ok(userMessageOne.scrolledIntoView, "点击时间线标记应滚动到对应消息");
+  assert.ok(messages[0].scrolledIntoView, "点击时间线标记应滚动到对应消息");
   assert.ok(bridgeCalls.some((call) => call.path === "/diagnostics/report" && call.payload?.event === "timeline_jump"));
 
   await rowDeleteButton.click();
@@ -413,6 +441,38 @@ async function deleteSelected(fixture) {
   await deleteSelected(fixture);
   assert.equal(fixture.selected.listItem.parentElement, null, "删除成功后应移除唯一会话行");
   assert.equal(fixture.context.window.location.href, "https://chatgpt.com/codex", "没有其他会话时应回到 Codex 首页");
+}
+
+{
+  const fixture = createFixture({
+    messages: [
+      makeMessage({ text: "只有一个问题", offsetTop: 120 })
+    ]
+  });
+  assert.equal(fixture.document.getElementById("codex-pilot-timeline"), null, "只有一个用户问题时不应显示时间线");
+  assert.ok(fixture.bridgeCalls.some((call) => call.payload?.event === "timeline_no_targets"));
+}
+
+{
+  const fixture = createFixture({
+    messages: [
+      makeMessage({ text: "用户: 第一个问题", role: "", testId: "conversation-turn", offsetTop: 120 }),
+      makeMessage({ text: "助手: 这是回答，不应该成为标记", role: "", testId: "conversation-turn", offsetTop: 420 }),
+      makeMessage({ text: "用户: 第二个问题", role: "", testId: "conversation-turn", offsetTop: 760 })
+    ]
+  });
+  const markers = fixture.document.querySelectorAll(".codex-pilot-timeline-marker");
+  assert.equal(markers.length, 2, "conversation-turn fallback 应只保留用户轮次");
+  assert.equal(markers[1].querySelector(".codex-pilot-timeline-tooltip").textContent, "用户: 第二个问题");
+}
+
+{
+  const fixture = createFixture();
+  const originalTimeline = fixture.document.getElementById("codex-pilot-timeline");
+  assert.ok(originalTimeline, "初次渲染应创建时间线");
+  fixture.mutationObservers.forEach((observer) => observer.trigger());
+  const timelines = fixture.document.querySelectorAll("#codex-pilot-timeline");
+  assert.equal(timelines.length, 1, "重复刷新不能创建多个时间线根节点");
 }
 
 console.log("renderer-inject fixture tests passed");

@@ -6,6 +6,7 @@ This guide explains what each CodexPilot page does, which local data it reads or
 
 - [Launch And Injection](#launch-and-injection)
 - [Session Export And Maintenance](#session-export-and-maintenance)
+- [Timeline](#timeline)
 - [Model Channel](#model-channel)
 - [Provider Ownership Sync](#provider-ownership-sync)
 - [Diagnostics](#diagnostics)
@@ -33,6 +34,12 @@ CodexPilot can add extra actions to regular and archived sessions:
 Delete and restore operations read and write the local Codex session database. CodexPilot keeps recoverable backups where possible, but you should still review session contents before batch cleanup.
 
 ![CodexPilot dialog maintenance page](images/readme-recycle-bin.png)
+
+## Timeline
+
+In the current Codex conversation, when CodexPilot detects at least two user prompts, it shows a lightweight Timeline near the right edge of the page. Each marker represents one user prompt. Hover to preview the prompt text, or click a marker to scroll that prompt into the center of the viewport.
+
+Timeline only reads the current page content. It does not write session files, state databases, or configuration files. If the current page is not a conversation, the session cannot be detected, or there are not enough user prompts, Timeline hides itself automatically.
 
 ## Model Channel
 

@@ -58,6 +58,7 @@ macOS 当前包未做 Apple Developer ID 签名和公证。如果系统提示无
 
 - 启动与注入
 - 会话导出
+- Timeline
 - 对话维护
 - 归档会话处理
 - 诊断快照

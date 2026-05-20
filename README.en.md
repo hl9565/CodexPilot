@@ -60,6 +60,7 @@ After switching model channels, historical sessions may disappear or group incor
 
 - Launch and injection
 - Session export
+- Timeline
 - Dialog maintenance
 - Archived session handling
 - Diagnostics snapshots

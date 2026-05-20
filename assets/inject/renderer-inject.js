@@ -1052,6 +1052,35 @@
       .slice(0, 120);
   }
 
+  function isLikelyUserMessageNode(node) {
+    if (!node) return false;
+    if (node.getAttribute?.("data-message-author-role") === "user") return true;
+    const testId = String(node.getAttribute?.("data-testid") || "");
+    if (/user-message/i.test(testId)) return true;
+    const className = typeof node.className === "string" ? node.className : String(node.className || "");
+    if (/user-message/i.test(className)) return true;
+    if (/conversation-turn/i.test(testId)) {
+      const role = String(node.getAttribute?.("data-message-author-role") || node.getAttribute?.("data-author-role") || "");
+      if (role) return role === "user";
+      const text = normalizeText(node.textContent || "");
+      if (/^(you|user|你|用户)[:：\s]/i.test(text)) return true;
+      if (/^(assistant|codex|助手)[:：\s]/i.test(text)) return false;
+    }
+    return false;
+  }
+
+  function timelineNodeOffset(node, scroller, fallbackOffset) {
+    const rect = node.getBoundingClientRect?.();
+    const top = Number(rect?.top);
+    if (Number.isFinite(top) && top !== 0) {
+      return top + scrollMetric(scroller, "scrollTop");
+    }
+    if (typeof node.offsetTop === "number" && node.offsetTop > 0) {
+      return node.offsetTop;
+    }
+    return fallbackOffset;
+  }
+
   function messageCandidates() {
     const selectors = [
       "[data-message-author-role='user']",
@@ -1065,6 +1094,7 @@
       document.querySelectorAll(selector).forEach((node) => {
         if (seen.has(node)) return;
         seen.add(node);
+        if (!isLikelyUserMessageNode(node)) return;
         const text = timelineTextFromNode(node);
         const rect = node.getBoundingClientRect?.();
         if (text.length >= 2 && (!rect || rect.height > 0)) {
@@ -1110,8 +1140,8 @@
       track.className = "codex-pilot-timeline-track";
       root.appendChild(track);
       items.forEach((item, index) => {
-        const rect = item.node.getBoundingClientRect?.();
-        const viewportOffset = rect ? rect.top + scrollMetric(scroller, "scrollTop") : index * (scrollHeight / items.length);
+        const fallbackOffset = index * (scrollHeight / Math.max(items.length - 1, 1));
+        const viewportOffset = timelineNodeOffset(item.node, scroller, fallbackOffset);
         const percent = Math.max(2, Math.min(98, (viewportOffset / scrollHeight) * 100));
         const marker = document.createElement("button");
         marker.type = "button";
