@@ -75,6 +75,24 @@ type ProviderProfileSaveResponse = {
   message: string;
 };
 
+type ProviderCount = {
+  provider: string;
+  count: number;
+};
+
+type ProviderSyncSnapshot = {
+  targetProvider: string;
+  currentProvider: string;
+  availableProviders: string[];
+  rolloutFiles: number;
+  rolloutRewriteNeeded: number;
+  sqliteRows: number;
+  sqliteProviderRowsNeedingSync: number;
+  sqliteTotalUpdatesNeeded: number;
+  rolloutProviders: ProviderCount[];
+  sqliteProviders: ProviderCount[];
+};
+
 type DiagnosticCheck = {
   name: string;
   status: string;
@@ -108,7 +126,7 @@ const views: Array<{ id: ViewId; label: string; icon: React.ElementType }> = [
   { id: "overview", label: "总览", icon: Activity },
   { id: "launch", label: "启动", icon: Terminal },
   { id: "provider", label: "模型通道", icon: LogIn },
-  { id: "sessions", label: "回收站", icon: History },
+  { id: "sessions", label: "对话维护", icon: History },
   { id: "diagnostics", label: "诊断", icon: Stethoscope },
 ];
 
@@ -398,9 +416,9 @@ function OverviewView({
         <div className="taskHeader">
           <div className="panelTitle compactTitle">
             <Trash2 size={16} />
-            <h2>回收站</h2>
+            <h2>对话维护</h2>
           </div>
-          <button className="secondary" onClick={() => onNavigate("sessions")} type="button">打开回收站</button>
+          <button className="secondary" onClick={() => onNavigate("sessions")} type="button">打开对话维护</button>
         </div>
         <dl className="metricGrid overviewMetrics">
           <Metric label="已删除" value={`${deletedCount} 条`} />
@@ -891,13 +909,35 @@ function RecycleBinView({
   const entries = recycleBin?.entries ?? [];
   const [selected, setSelected] = React.useState<string[]>([]);
   const [pendingAction, setPendingAction] = React.useState("");
+  const [syncSnapshot, setSyncSnapshot] = React.useState<ProviderSyncSnapshot | null>(null);
+  const [syncTarget, setSyncTarget] = React.useState("CodexPilot");
+  const [customSyncTarget, setCustomSyncTarget] = React.useState("");
+  const [syncBusy, setSyncBusy] = React.useState(false);
   const selectedEntries = entries.filter((entry) => selected.includes(entry.token));
   const recoverableSelected = selectedEntries.filter((entry) => entry.recoverable);
   const allSelected = entries.length > 0 && selected.length === entries.length;
+  const selectedSyncTarget = syncTarget === "__custom" ? customSyncTarget.trim() : syncTarget;
+
+  const refreshProviderSync = React.useCallback((target = "CodexPilot") => {
+    callBackend<ProviderSyncSnapshot>("provider_sync_snapshot", {
+      request: { targetProvider: target || "CodexPilot" },
+    })
+      .then((snapshot) => {
+        setSyncSnapshot(snapshot);
+        if (syncTarget !== "__custom") {
+          setSyncTarget(snapshot.targetProvider || "CodexPilot");
+        }
+      })
+      .catch((error) => onMessage(`检查对话归属失败：${String(error)}`));
+  }, [onMessage, syncTarget]);
 
   React.useEffect(() => {
     setSelected((current) => current.filter((token) => entries.some((entry) => entry.token === token)));
   }, [entries]);
+
+  React.useEffect(() => {
+    refreshProviderSync("CodexPilot");
+  }, []);
 
   const toggleAll = () => {
     setSelected(allSelected ? [] : entries.map((entry) => entry.token));
@@ -950,12 +990,44 @@ function RecycleBinView({
       });
   };
 
+  const inspectProviderSync = () => {
+    const target = selectedSyncTarget || "CodexPilot";
+    refreshProviderSync(target);
+    onMessage(`正在检查对话归属：${target}`);
+  };
+
+  const runProviderSync = () => {
+    const target = selectedSyncTarget || "CodexPilot";
+    const pending = syncSnapshot
+      ? syncSnapshot.rolloutRewriteNeeded + syncSnapshot.sqliteProviderRowsNeedingSync
+      : 0;
+    if (!window.confirm(`确定把历史对话归属同步为“${target}”？预计影响 ${pending} 项。`)) {
+      return;
+    }
+    setSyncBusy(true);
+    onProgress("正在同步对话归属");
+    callBackend<string>("sync_provider_sessions", { request: { targetProvider: target } })
+      .then((message) => {
+        onMessage(message);
+        refreshProviderSync(target);
+        onRefresh();
+      })
+      .catch((error) => onMessage(`同步对话归属失败：${String(error)}`))
+      .finally(() => {
+        setSyncBusy(false);
+        onProgress("");
+      });
+  };
+
+  const providerOptions = syncSnapshot?.availableProviders ?? ["CodexPilot"];
+
   return (
+    <div className="sessionsLayout">
     <section className="panel">
       <div className="panelHeader">
         <div className="panelTitle">
           <Trash2 size={16} />
-          <h2>已删除会话</h2>
+          <h2>回收站</h2>
         </div>
         <div className="buttonRow">
           <button className="secondary" onClick={onRefresh} type="button">刷新</button>
@@ -1032,6 +1104,63 @@ function RecycleBinView({
         <p className="bodyText">暂无已删除会话。</p>
       )}
     </section>
+    <section className="panel">
+      <div className="panelHeader">
+        <div className="panelTitle">
+          <History size={16} />
+          <h2>对话归属同步</h2>
+        </div>
+        <div className="buttonRow">
+          <button className="secondary" onClick={inspectProviderSync} type="button">
+            <RefreshCw size={16} />
+            预览影响
+          </button>
+          <button className="primary" disabled={syncBusy} onClick={runProviderSync} type="button">
+            <RefreshCw size={16} />
+            {syncBusy ? "同步中" : "同步"}
+          </button>
+        </div>
+      </div>
+      <div className="syncTool">
+        <div className="syncControls">
+          <label>
+            <span className="labelWithHelp">
+              目标 Provider
+              <button
+                className="helpDot"
+                title="将历史对话的 provider 归属统一改成这个值。CodexPilot 是默认中转归属；选择其他值前建议先预览影响。"
+                type="button"
+              >
+                ?
+              </button>
+            </span>
+            <select value={syncTarget} onChange={(event) => setSyncTarget(event.target.value)}>
+              {providerOptions.map((provider) => (
+                <option key={provider} value={provider}>{provider}</option>
+              ))}
+              <option value="__custom">自定义</option>
+            </select>
+          </label>
+          {syncTarget === "__custom" && (
+            <label>
+              <span>自定义 Provider</span>
+              <input value={customSyncTarget} onChange={(event) => setCustomSyncTarget(event.target.value)} placeholder="provider-name" />
+            </label>
+          )}
+        </div>
+        <div className="syncSummaryGrid">
+          <Metric label="目标" value={selectedSyncTarget || "CodexPilot"} />
+          <Metric label="当前配置" value={syncSnapshot?.currentProvider ?? "-"} />
+          <Metric label="rollout 待改" value={`${syncSnapshot?.rolloutRewriteNeeded ?? 0}/${syncSnapshot?.rolloutFiles ?? 0}`} />
+          <Metric label="SQLite 待改" value={`${syncSnapshot?.sqliteProviderRowsNeedingSync ?? 0}/${syncSnapshot?.sqliteRows ?? 0}`} />
+        </div>
+        <div className="providerDistribution">
+          <Distribution title="rollout 分布" items={syncSnapshot?.rolloutProviders ?? []} />
+          <Distribution title="SQLite 分布" items={syncSnapshot?.sqliteProviders ?? []} />
+        </div>
+      </div>
+    </section>
+    </div>
   );
 }
 
@@ -1095,6 +1224,7 @@ function DiagnosticsView({
   };
 
   return (
+    <div className="diagnosticsLayout">
     <section className="panel">
       <div className="panelHeader">
         <div className="panelTitle">
@@ -1133,6 +1263,22 @@ function DiagnosticsView({
         {logText || "暂无日志"}
       </pre>
     </section>
+    </div>
+  );
+}
+
+function Distribution({ title, items }: { title: string; items: ProviderCount[] }) {
+  return (
+    <div className="distributionBox">
+      <strong>{title}</strong>
+      <div>
+        {items.length ? items.map((item) => (
+          <span className="providerChip" key={item.provider}>
+            {item.provider || "空"} {item.count}
+          </span>
+        )) : <span className="bodyText">无</span>}
+      </div>
+    </div>
   );
 }
 

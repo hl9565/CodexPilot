@@ -62,7 +62,21 @@ pub fn inspect_provider_sync(codex_home: Option<&Path>) -> anyhow::Result<Provid
     let home = codex_home
         .map(Path::to_path_buf)
         .unwrap_or_else(|| dirs_home().join(".codex"));
-    let target_provider = read_current_provider(&home.join("config.toml"));
+    inspect_provider_sync_with_target(Some(&home), None)
+}
+
+pub fn inspect_provider_sync_with_target(
+    codex_home: Option<&Path>,
+    target_provider: Option<&str>,
+) -> anyhow::Result<ProviderSyncInspection> {
+    let home = codex_home
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| dirs_home().join(".codex"));
+    let target_provider = normalize_target_provider(
+        target_provider
+            .map(ToString::to_string)
+            .unwrap_or_else(|| read_current_provider(&home.join("config.toml"))),
+    );
     let changes = collect_session_changes(&home, &target_provider)?;
     let thread_ids_with_user_events = changes
         .iter()
@@ -107,17 +121,32 @@ pub fn run_provider_sync(codex_home: Option<&Path>) -> ProviderSyncResult {
     let home = codex_home
         .map(Path::to_path_buf)
         .unwrap_or_else(|| dirs_home().join(".codex"));
+    let target_provider = read_current_provider(&home.join("config.toml"));
+    run_provider_sync_with_target(Some(&home), Some(&target_provider))
+}
+
+pub fn run_provider_sync_with_target(
+    codex_home: Option<&Path>,
+    target_provider: Option<&str>,
+) -> ProviderSyncResult {
+    let home = codex_home
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| dirs_home().join(".codex"));
+    let target_provider = normalize_target_provider(
+        target_provider
+            .map(ToString::to_string)
+            .unwrap_or_else(|| read_current_provider(&home.join("config.toml"))),
+    );
     if !home.exists() {
         return result(
             ProviderSyncStatus::Skipped,
             format!("Codex home 不存在：{}", home.display()),
-            DEFAULT_PROVIDER,
+            &target_provider,
             None,
             0,
             0,
         );
     }
-    let target_provider = read_current_provider(&home.join("config.toml"));
     let lock_dir = home.join("tmp/provider-sync.lock");
     if acquire_lock(&lock_dir).is_err() {
         return result(
@@ -206,6 +235,15 @@ pub fn run_provider_sync(codex_home: Option<&Path>) -> ProviderSyncResult {
             0,
         )
     })
+}
+
+fn normalize_target_provider(value: String) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        DEFAULT_PROVIDER.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn result(

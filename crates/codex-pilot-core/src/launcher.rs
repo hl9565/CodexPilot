@@ -66,21 +66,6 @@ where
 }
 
 pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
-    let sync =
-        tokio::task::spawn_blocking(|| codex_pilot_data::provider_sync::run_provider_sync(None))
-            .await
-            .map_err(|error| anyhow::anyhow!("provider sync task failed: {error}"))?;
-    let _ = crate::diagnostic_log::append(
-        "provider_sync.startup",
-        serde_json::json!({
-            "status": sync.status,
-            "message": sync.message,
-            "target_provider": sync.target_provider,
-            "changed_session_files": sync.changed_session_files,
-            "sqlite_rows_updated": sync.sqlite_rows_updated,
-            "backup_dir": sync.backup_dir
-        }),
-    );
     let app_dir = crate::app_paths::resolve_codex_app_dir(options.app_dir.as_deref())
         .ok_or_else(|| anyhow::anyhow!("Codex App directory not found"))?;
     let debug_port = crate::ports::select_platform_loopback_port(options.debug_port);

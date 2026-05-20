@@ -105,10 +105,7 @@ async fn undo_session(ctx: BridgeContext, payload: Value) -> Value {
         .await
         .map_err(|error| error.to_string())
         .and_then(|result| result.map_err(|error| error.to_string()))
-        .map(|result| {
-            let sync = codex_pilot_data::provider_sync::run_provider_sync(None);
-            json!({"status": "ok", "result": result, "provider_sync": sync})
-        })
+        .map(|result| json!({"status": "ok", "result": result}))
         .unwrap_or_else(|message| failed(message))
 }
 

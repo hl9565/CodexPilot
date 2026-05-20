@@ -42,7 +42,8 @@ button:disabled {
   opacity: 0.55;
 }
 
-input {
+input,
+select {
   background: #ffffff;
   border: 1px solid #cfd7e2;
   border-radius: 7px;
@@ -528,6 +529,14 @@ h2 {
   min-width: 0;
 }
 
+.diagnosticsLayout,
+.sessionsLayout {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+  min-width: 0;
+}
+
 .widePanel {
   grid-column: 1 / -1;
 }
@@ -647,6 +656,100 @@ h2 {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.syncTool {
+  display: grid;
+  gap: 12px;
+}
+
+.syncControls {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.syncControls label {
+  display: grid;
+  gap: 6px;
+}
+
+.syncControls label span {
+  color: #6a7889;
+  font-size: 12px;
+}
+
+.labelWithHelp {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.helpDot {
+  align-items: center;
+  background: #eef4ff;
+  border: 1px solid #cad8ff;
+  border-radius: 999px;
+  color: #2459c5;
+  cursor: help;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  height: 18px;
+  justify-content: center;
+  min-height: 18px;
+  padding: 0;
+  width: 18px;
+}
+
+.helpDot:hover {
+  background: #dfe9ff;
+  border-color: #9db7ff;
+}
+
+.syncSummaryGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+}
+
+.providerDistribution {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.distributionBox {
+  background: #f8fafc;
+  border: 1px solid #e2e7ee;
+  border-radius: 7px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.distributionBox strong {
+  color: #233044;
+  font-size: 13px;
+}
+
+.distributionBox div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.providerChip {
+  background: #ffffff;
+  border: 1px solid #d7dde5;
+  border-radius: 999px;
+  color: #526071;
+  font-size: 12px;
+  line-height: 1;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
 }
 
 .statusMetric {

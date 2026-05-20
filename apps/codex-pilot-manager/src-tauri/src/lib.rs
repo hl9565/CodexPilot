@@ -71,6 +71,21 @@ struct ProviderSnapshot {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ProviderSyncSnapshot {
+    target_provider: String,
+    current_provider: String,
+    available_providers: Vec<String>,
+    rollout_files: usize,
+    rollout_rewrite_needed: usize,
+    sqlite_rows: usize,
+    sqlite_provider_rows_needing_sync: usize,
+    sqlite_total_updates_needed: usize,
+    rollout_providers: Vec<codex_pilot_data::provider_sync::ProviderCount>,
+    sqlite_providers: Vec<codex_pilot_data::provider_sync::ProviderCount>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DiagnosticCheck {
     name: String,
     status: String,
@@ -172,6 +187,12 @@ struct ProviderProfileSaveResponse {
 #[serde(rename_all = "camelCase")]
 struct ProviderProfileIdRequest {
     id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderSyncRequest {
+    target_provider: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -404,15 +425,10 @@ async fn apply_provider(request: ProviderApplyRequest) -> Result<String, String>
                     .map_err(|error| format!("应用 API 中转失败：{error}"))?
             }
         };
-        let sync = codex_pilot_data::provider_sync::run_provider_sync(None);
-        let sync_detail = format!(
-            "Provider Sync：{}，会话文件 {} 个，数据库行 {} 条。",
-            sync.message, sync.changed_session_files, sync.sqlite_rows_updated
-        );
         Ok(result
             .backup_path
-            .map(|path| format!("{} 已应用，备份：{path}。{sync_detail}", mode.label()))
-            .unwrap_or_else(|| format!("{} 已应用。{sync_detail}", mode.label())))
+            .map(|path| format!("{} 已应用，备份：{path}。", mode.label()))
+            .unwrap_or_else(|| format!("{} 已应用。", mode.label())))
     })
     .await
     .map_err(|error| format!("应用运行模式任务失败：{error}"))?
@@ -493,12 +509,71 @@ fn clear_provider() -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn sync_provider_sessions() -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        provider_sync_message(codex_pilot_data::provider_sync::run_provider_sync(None))
+async fn provider_sync_snapshot(
+    request: Option<ProviderSyncRequest>,
+) -> Result<ProviderSyncSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let current = codex_pilot_core::relay_config::default_relay_provider_config();
+        let current_provider = if current.active {
+            current.provider
+        } else {
+            "openai".to_string()
+        };
+        let target_provider = sanitize_provider_sync_target(
+            request
+                .and_then(|item| item.target_provider)
+                .unwrap_or_else(|| "CodexPilot".to_string()),
+        )?;
+        let inspection = codex_pilot_data::provider_sync::inspect_provider_sync_with_target(
+            None,
+            Some(&target_provider),
+        )
+        .map_err(|error| format!("检查历史会话同步失败：{error}"))?;
+        let mut available = vec!["CodexPilot".to_string(), current_provider.clone()];
+        available.extend(
+            inspection
+                .rollout_providers
+                .iter()
+                .chain(inspection.sqlite_providers.iter())
+                .map(|item| item.provider.clone())
+                .filter(|item| !item.trim().is_empty()),
+        );
+        available.sort();
+        available.dedup();
+        Ok(ProviderSyncSnapshot {
+            target_provider: inspection.target_provider,
+            current_provider,
+            available_providers: available,
+            rollout_files: inspection.rollout_files,
+            rollout_rewrite_needed: inspection.rollout_rewrite_needed,
+            sqlite_rows: inspection.sqlite_rows,
+            sqlite_provider_rows_needing_sync: inspection.sqlite_provider_rows_needing_sync,
+            sqlite_total_updates_needed: inspection.sqlite_total_updates_needed,
+            rollout_providers: inspection.rollout_providers,
+            sqlite_providers: inspection.sqlite_providers,
+        })
     })
     .await
-    .map_err(|error| format!("同步历史会话任务失败：{error}"))
+    .map_err(|error| format!("检查历史会话同步任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn sync_provider_sessions(request: ProviderSyncRequest) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target_provider = sanitize_provider_sync_target(
+            request
+                .target_provider
+                .unwrap_or_else(|| "CodexPilot".to_string()),
+        )?;
+        Ok(provider_sync_message(
+            codex_pilot_data::provider_sync::run_provider_sync_with_target(
+                None,
+                Some(&target_provider),
+            ),
+        ))
+    })
+    .await
+    .map_err(|error| format!("同步历史会话任务失败：{error}"))?
 }
 
 #[tauri::command]
@@ -534,12 +609,8 @@ async fn restore_recycle_bin_entries(request: RecycleBinTokensRequest) -> Result
                 Err(error) => failed.push(format!("{token}：{error}")),
             }
         }
-        let sync = codex_pilot_data::provider_sync::run_provider_sync(None);
         if failed.is_empty() {
-            Ok(format!(
-                "已恢复 {restored} 条会话。Provider Sync：{}，会话文件 {} 个，数据库行 {} 条。",
-                sync.message, sync.changed_session_files, sync.sqlite_rows_updated
-            ))
+            Ok(format!("已恢复 {restored} 条会话。"))
         } else {
             Ok(format!(
                 "已恢复 {restored} 条，会有 {} 条失败：{}",
@@ -664,6 +735,7 @@ pub fn run() {
             activate_provider_profile,
             delete_provider_profile,
             clear_provider,
+            provider_sync_snapshot,
             sync_provider_sessions,
             recycle_bin_snapshot,
             restore_recycle_bin_entries,
@@ -905,8 +977,28 @@ fn provider_sync_message(sync: codex_pilot_data::provider_sync::ProviderSyncResu
     )
 }
 
+fn sanitize_provider_sync_target(value: String) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("同步目标 Provider 不能为空。".to_string());
+    }
+    if trimmed.len() > 80 {
+        return Err("同步目标 Provider 过长。".to_string());
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+    {
+        return Err("同步目标 Provider 只能包含字母、数字、下划线、中划线或点。".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
 fn provider_sync_diagnostic_check() -> DiagnosticCheck {
-    match codex_pilot_data::provider_sync::inspect_provider_sync(None) {
+    match codex_pilot_data::provider_sync::inspect_provider_sync_with_target(
+        None,
+        Some("CodexPilot"),
+    ) {
         Ok(inspection) => {
             let pending =
                 inspection.rollout_rewrite_needed + inspection.sqlite_provider_rows_needing_sync;
