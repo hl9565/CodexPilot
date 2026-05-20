@@ -236,21 +236,20 @@
 
       .${actionGroupClass} {
         align-items: center;
-        background: rgba(31, 36, 48, 0.78);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 7px;
-        box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+        background: transparent;
+        border: 0;
+        box-shadow: none;
         display: inline-flex;
-        gap: 2px;
+        gap: 6px;
         opacity: 0;
         pointer-events: none;
         position: absolute;
-        right: 8px;
+        right: 42px;
         top: 50%;
-        padding: 2px;
+        padding: 0;
         transform: translateY(-50%);
         transition: opacity 120ms ease;
-        z-index: 4;
+        z-index: 20;
       }
 
       [data-codex-pilot-row="true"]:hover .${actionGroupClass},
@@ -259,19 +258,26 @@
         pointer-events: auto;
       }
 
+      [data-codex-pilot-row="true"]:hover [data-thread-title],
+      [data-codex-pilot-row="true"]:focus-within [data-thread-title] {
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 112px), transparent calc(100% - 96px));
+        mask-image: linear-gradient(90deg, #000 calc(100% - 112px), transparent calc(100% - 96px));
+      }
+
       .${actionButtonClass},
       .${archiveActionClass} {
         align-items: center;
-        background: transparent;
-        border: 0;
+        background: rgba(31, 36, 48, 0.78);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 5px;
+        box-shadow: 0 5px 12px rgba(0, 0, 0, 0.16);
         color: #d9dee8;
         cursor: pointer;
         display: inline-flex;
-        height: 24px;
+        height: 26px;
         justify-content: center;
         padding: 0;
-        width: 24px;
+        width: 26px;
       }
 
       .${actionButtonClass}:hover,
@@ -1145,6 +1151,59 @@
     setTimeout(renderTimeline, 180);
   }
 
+  let backendStatusCheckSeq = 0;
+
+  function formatBackendStatusMessage(result) {
+    return result.status === "ok"
+      ? `${result.message || "后端已连接"} (${result.transport || "bridge"})`
+      : result.message || "后端检查失败";
+  }
+
+  function backendStatusWithTimeout() {
+    const request = window.__CODEX_PILOT__.backendStatus();
+    if (typeof window.setTimeout !== "function") return request;
+    return Promise.race([
+      request,
+      new Promise((resolve) => {
+        window.setTimeout(() => resolve({
+          status: "timeout",
+          message: "后端检查超时"
+        }), 2000);
+      })
+    ]);
+  }
+
+  async function refreshBackendStatus(root, message) {
+    const seq = ++backendStatusCheckSeq;
+    root.dataset.status = "checking";
+    message.textContent = "正在检查后端...";
+    try {
+      const result = await backendStatusWithTimeout();
+      if (seq !== backendStatusCheckSeq) return;
+      root.dataset.status = result.status === "ok" ? "connected" : "unknown";
+      message.textContent = formatBackendStatusMessage(result);
+      if (result.status !== "ok") {
+        reportRendererEvent("backend_status_error", {
+          status: result.status || "unknown",
+          message: result.message || ""
+        });
+      }
+    } catch (error) {
+      if (seq !== backendStatusCheckSeq) return;
+      root.dataset.status = "unknown";
+      message.textContent = String(error);
+      reportRendererEvent("backend_status_error", { message: String(error) });
+    }
+  }
+
+  function scheduleBackendStatusHeartbeat(root, message) {
+    refreshBackendStatus(root, message);
+    if (typeof window.setInterval !== "function" || window.__codexPilotBackendStatusHeartbeat) return;
+    window.__codexPilotBackendStatusHeartbeat = window.setInterval(() => {
+      refreshBackendStatus(root, message);
+    }, 5000);
+  }
+
   function normalizeText(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
   }
@@ -1158,7 +1217,7 @@
     const root = document.createElement("div");
     root.id = rootId;
     root.dataset.open = "false";
-    root.dataset.status = "unknown";
+    root.dataset.status = "checking";
 
     const panel = document.createElement("div");
     panel.className = "codex-pilot-panel";
@@ -1170,11 +1229,6 @@
       : "dev";
     title.innerHTML = `<strong>CodexPilot</strong><span class="codex-pilot-version">${versionLabel}</span>`;
 
-    const statusButton = document.createElement("button");
-    statusButton.className = "codex-pilot-action";
-    statusButton.type = "button";
-    statusButton.innerHTML = "<span>后端状态</span><span>检查</span>";
-
     const exportButton = document.createElement("button");
     exportButton.className = "codex-pilot-action";
     exportButton.type = "button";
@@ -1182,23 +1236,7 @@
 
     const message = document.createElement("div");
     message.className = "codex-pilot-message";
-    message.textContent = "就绪";
-
-    statusButton.addEventListener("click", async () => {
-      message.textContent = "正在检查后端...";
-      root.dataset.status = "checking";
-      try {
-        const result = await window.__CODEX_PILOT__.backendStatus();
-        root.dataset.status = result.status === "ok" ? "connected" : "unknown";
-        message.textContent = result.status === "ok"
-          ? `${result.message || "后端已连接"} (${result.transport || "bridge"})`
-          : result.message || "后端检查失败";
-      } catch (error) {
-        root.dataset.status = "unknown";
-        message.textContent = String(error);
-        reportRendererEvent("backend_status_error", { message: String(error) });
-      }
-    });
+    message.textContent = "正在检查后端...";
 
     exportButton.addEventListener("click", async () => {
       const session = window.__CODEX_PILOT__.detectSession();
@@ -1233,9 +1271,10 @@
       root.dataset.open = root.dataset.open === "true" ? "false" : "true";
     });
 
-    panel.append(title, statusButton, exportButton, message);
+    panel.append(title, exportButton, message);
     root.append(panel, toggle);
     document.body.appendChild(root);
+    scheduleBackendStatusHeartbeat(root, message);
   }
 
   function startRefreshLoop() {

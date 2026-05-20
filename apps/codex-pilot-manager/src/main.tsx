@@ -23,6 +23,7 @@ import {
   Plus,
 } from "lucide-react";
 import { callBackend, isUiPreviewMode } from "./backend";
+import { resolveAutoLaunchAction } from "./autoLaunch";
 import "./styles.css";
 
 type BackendStatus = {
@@ -35,6 +36,7 @@ type LaunchSnapshot = {
   requestedAppPath: string;
   debugPort: number;
   helperPort: number;
+  autoLaunchOnOpen: boolean;
   ready: boolean;
   state: string;
   actionKind: string;
@@ -153,6 +155,7 @@ function App() {
   const [toast, setToast] = React.useState("");
   const [progressMessage, setProgressMessage] = React.useState("");
   const [launching, setLaunching] = React.useState(false);
+  const autoLaunchAttemptedRef = React.useRef(false);
 
   const notify = React.useCallback((value: string) => {
     setMessage(value);
@@ -211,6 +214,37 @@ function App() {
       .then(setAppVersion)
       .catch(() => setAppVersion(null));
   }, []);
+
+  React.useEffect(() => {
+    if (!launch) return;
+    const action = resolveAutoLaunchAction({
+      actionKind: launch.actionKind,
+      autoLaunchOnOpen: launch.autoLaunchOnOpen,
+      alreadyAttempted: autoLaunchAttemptedRef.current,
+      launching,
+    });
+    if (action.kind === "skip") return;
+    if (action.markAttempted) {
+      autoLaunchAttemptedRef.current = true;
+    }
+    if (action.kind === "stop") {
+      if (action.message) notify(action.message);
+      return;
+    }
+    setLaunching(true);
+    setProgressMessage(action.progress);
+    notify(action.message);
+    callBackend<string>(action.command)
+      .then((value) => {
+        notify(value);
+        refresh(true);
+      })
+      .catch((error) => notify(String(error)))
+      .finally(() => {
+        setLaunching(false);
+        setProgressMessage("");
+      });
+  }, [launch, launching, notify, refresh]);
 
   const handleLaunch = () => {
     if (launching) return;
@@ -455,6 +489,7 @@ function LaunchView({
   const [appPath, setAppPath] = React.useState("");
   const [debugPort, setDebugPort] = React.useState("9688");
   const [helperPort, setHelperPort] = React.useState("58888");
+  const [autoLaunchOnOpen, setAutoLaunchOnOpen] = React.useState(false);
   const [saveMessage, setSaveMessage] = React.useState("");
   const backendState = backendStatusLabel(status);
   const connectionState = launch?.debugReachable ? "可直接注入" : launch?.codexRunning ? "需要重启注入" : "可启动";
@@ -464,6 +499,7 @@ function LaunchView({
     setAppPath(launch.requestedAppPath || launch.appPath || "");
     setDebugPort(String(launch.debugPort));
     setHelperPort(String(launch.helperPort));
+    setAutoLaunchOnOpen(Boolean(launch.autoLaunchOnOpen));
   }, [launch]);
 
   const savePreferences = () => {
@@ -486,6 +522,7 @@ function LaunchView({
         appPath,
         debugPort: debug,
         helperPort: helper,
+        autoLaunchOnOpen,
       },
     })
       .then((message) => {
@@ -561,6 +598,14 @@ function LaunchView({
               onChange={(event) => setHelperPort(event.target.value)}
               placeholder="58888"
             />
+          </label>
+          <label className="checkboxRow">
+            <input
+              checked={autoLaunchOnOpen}
+              onChange={(event) => setAutoLaunchOnOpen(event.target.checked)}
+              type="checkbox"
+            />
+            <span>打开 CodexPilot 时自动启动或注入 Codex</span>
           </label>
           <div className="buttonRow">
             <button className="primary" onClick={savePreferences} type="button">保存偏好</button>

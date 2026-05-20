@@ -237,6 +237,7 @@ function createFixture({ includeOther = true } = {}) {
 
   const bridgeCalls = [];
   const confirmMessages = [];
+  const intervals = [];
   const storage = new Map();
   const context = {
     console: { info() {} },
@@ -258,6 +259,10 @@ function createFixture({ includeOther = true } = {}) {
       setTimeout(callback, delay = 0) {
         if (typeof callback === "function" && Number(delay) < 1000) callback();
         return 1;
+      },
+      setInterval(callback, delay = 0) {
+        intervals.push({ callback, delay });
+        return intervals.length;
       },
       scrollTo(options) {
         this.scrollY = typeof options === "object" ? options.top : Number(options) || 0;
@@ -314,7 +319,7 @@ function createFixture({ includeOther = true } = {}) {
   context.window.document = document;
   context.window.history = context.history;
   vm.runInNewContext(source, context, { filename: "renderer-inject.js" });
-  return { bridgeCalls, confirmMessages, context, document, other, selected, userMessageOne };
+  return { bridgeCalls, confirmMessages, context, document, intervals, other, selected, userMessageOne };
 }
 
 async function deleteSelected(fixture) {
@@ -325,27 +330,33 @@ async function deleteSelected(fixture) {
   return rowDeleteButton;
 }
 
+async function flushAsyncWork() {
+  for (let index = 0; index < 8; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 {
   const fixture = createFixture();
-  const { bridgeCalls, confirmMessages, document, other, selected, userMessageOne } = fixture;
+  await flushAsyncWork();
+  const { bridgeCalls, confirmMessages, document, intervals, other, selected, userMessageOne } = fixture;
   const root = document.getElementById("codex-pilot-root");
   assert.ok(root, "应创建 CodexPilot 浮动菜单");
-  assert.equal(root.dataset.status, "unknown");
-  assert.match(root.textContent, /Pilot|后端状态|导出 Markdown/);
+  assert.equal(root.dataset.status, "connected");
+  assert.match(root.textContent, /Pilot|导出 Markdown/);
+  assert.doesNotMatch(root.textContent, /后端状态|检查/);
   assert.match(root.textContent, /CodexPilot|dev/);
   assert.doesNotMatch(root.textContent, /助手/);
   assert.ok(root.querySelector(".codex-pilot-status-dot"), "应显示 Pilot 状态点");
   assert.doesNotMatch(root.textContent, /当前会话|删除会话|撤销删除/);
+  assert.ok(bridgeCalls.some((call) => call.path === "/backend/status"), "应自动检查后端状态");
+  assert.ok(intervals.some((item) => item.delay === 5000), "应启动后端状态心跳");
   assert.ok(bridgeCalls.some((call) => call.path === "/diagnostics/report" && call.payload?.event === "loaded"));
   assert.ok(bridgeCalls.some((call) => call.path === "/diagnostics/report" && call.payload?.event === "scroll_restore_ready"));
 
   const buttons = root.querySelectorAll("button");
-  const statusButton = buttons[0];
-  const floatingExportButton = buttons[1];
+  const floatingExportButton = buttons[0];
   const message = root.querySelector(".codex-pilot-message");
-
-  await statusButton.click();
-  assert.equal(root.dataset.status, "connected");
   assert.match(message.textContent, /后端已连接/);
 
   await floatingExportButton.click();
@@ -367,6 +378,12 @@ async function deleteSelected(fixture) {
   const rowExportButton = selected.row.querySelectorAll("button")
     .find((button) => button.getAttribute("aria-label") === "导出 Markdown");
   assert.ok(rowExportButton, "应在会话行添加导出按钮");
+  const rowActionGroup = selected.row.querySelector(".codex-pilot-row-actions");
+  assert.ok(rowActionGroup, "应创建独立的会话行操作组");
+  assert.equal(rowActionGroup.children.length, 2, "会话行操作组只包含 CodexPilot 自己的按钮");
+  const styleText = document.getElementById("codex-pilot-style").textContent;
+  assert.match(styleText, /right:\s*42px;/, "会话行操作组应避开 Codex 原生右侧按钮");
+  assert.match(styleText, /mask-image:\s*linear-gradient/, "悬停时应遮罩标题，避免文字与操作按钮重叠");
 
   const timeline = document.getElementById("codex-pilot-timeline");
   assert.ok(timeline, "应为长对话创建时间线");

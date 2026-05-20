@@ -403,6 +403,17 @@ h2 {
   font-size: 12px;
 }
 
+.formStack .checkboxRow {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.formStack .checkboxRow span {
+  color: #3c4858;
+  font-size: 13px;
+}
+
 .formMessage {
   color: #526071;
   font-size: 12px;

@@ -24,6 +24,7 @@ struct LaunchSnapshot {
     requested_app_path: String,
     debug_port: u16,
     helper_port: u16,
+    auto_launch_on_open: bool,
     ready: bool,
     state: String,
     action_kind: String,
@@ -41,6 +42,8 @@ struct LaunchPreferences {
     app_path: String,
     debug_port: u16,
     helper_port: u16,
+    #[serde(default)]
+    auto_launch_on_open: bool,
 }
 
 impl Default for LaunchPreferences {
@@ -50,6 +53,7 @@ impl Default for LaunchPreferences {
             app_path: String::new(),
             debug_port: options.debug_port,
             helper_port: options.helper_port,
+            auto_launch_on_open: false,
         }
     }
 }
@@ -236,6 +240,7 @@ fn launch_snapshot_with_state(state: LaunchState) -> Result<LaunchSnapshot, Stri
         requested_app_path: prefs.app_path,
         debug_port: options.debug_port,
         helper_port: options.helper_port,
+        auto_launch_on_open: prefs.auto_launch_on_open,
         ready: !command_preview.is_empty(),
         state: launch_state_label(&state),
         action_kind: launch_action_kind(!command_preview.is_empty(), manager_running, &options),
@@ -1278,6 +1283,7 @@ mod tests {
             app_path: app_dir.to_string_lossy().to_string(),
             debug_port: 9444,
             helper_port: 58444,
+            auto_launch_on_open: true,
         })
         .unwrap();
         save_launch_preferences_to_path(&path, &prefs).unwrap();
@@ -1286,6 +1292,7 @@ mod tests {
         assert_eq!(loaded.app_path, app_dir.to_string_lossy());
         assert_eq!(loaded.debug_port, 9444);
         assert_eq!(loaded.helper_port, 58444);
+        assert!(loaded.auto_launch_on_open);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1296,6 +1303,7 @@ mod tests {
             app_path: String::new(),
             debug_port: 9444,
             helper_port: 9444,
+            auto_launch_on_open: false,
         });
 
         assert!(result.unwrap_err().contains("不能相同"));
@@ -1307,6 +1315,7 @@ mod tests {
             app_path: String::new(),
             debug_port: 9333,
             helper_port: 57321,
+            auto_launch_on_open: false,
         })
         .unwrap();
 
@@ -1326,6 +1335,7 @@ mod tests {
             app_path: String::new(),
             debug_port: 9444,
             helper_port: 58888,
+            auto_launch_on_open: false,
         })
         .unwrap();
 
