@@ -65,7 +65,7 @@ npm run dev
 2. 打开 CodexPilot 管理器。
 3. 在“启动与注入”里确认 Codex 应用路径和端口状态。
 4. 点击“启动 Codex”。
-5. 在 Codex 页面右下角使用 CodexPilot 菜单，或回到管理器使用中转、会话维护和诊断功能。
+5. 在 Codex 页面右下角使用 CodexPilot 菜单，或回到管理器使用模型通道、会话维护和诊断功能。
 
 ## 功能说明
 
@@ -94,11 +94,11 @@ CodexPilot 可以在会话行和归档会话页面添加额外操作：
 使用步骤：
 
 1. 先用原版 Codex 完成 ChatGPT 登录。
-2. 打开 CodexPilot 管理器，进入“中转”。
+2. 打开 CodexPilot 管理器，进入“模型通道”。
 3. 新增或选择一个中转配置档。
 4. 填写 Base URL 和 API Key，保存配置。
-5. 点击“应用中转”。
-6. 从 CodexPilot 启动 Codex。
+5. 选择“混合中转”并点击“保存”。
+6. 从 CodexPilot 启动或重新注入 Codex。
 
 CodexPilot 会写入 `~/.codex/config.toml`，配置形态类似：
 
@@ -113,11 +113,11 @@ base_url = "https://example.com/v1"
 experimental_bearer_token = "sk-..."
 ```
 
-如果没有检测到 `~/.codex/auth.json` 中的 ChatGPT 登录态，CodexPilot 会拒绝应用中转配置。
+如果没有检测到 `~/.codex/auth.json` 中的 ChatGPT 登录态，CodexPilot 会拒绝保存混合中转配置。
 
 ### Provider Sync
 
-切换 provider 后，历史会话可能因为 `model_provider` 不一致而不可见或分组异常。CodexPilot 在应用中转后，以及启动 Codex 前，会自动同步本地会话元数据。
+切换 provider 后，历史会话可能因为 `model_provider` 不一致而不可见或分组异常。CodexPilot 在保存混合中转后，以及启动 Codex 前，会自动同步本地会话元数据。
 
 同步范围：
 
@@ -132,9 +132,9 @@ experimental_bearer_token = "sk-..."
 ~/.codex/backups_state/provider-sync/
 ```
 
-### 清除中转
+### 官方通道
 
-在管理器“中转”页面点击“清除中转”，CodexPilot 会：
+在管理器“模型通道”页面选择“官方通道”并点击“保存”，CodexPilot 会：
 
 - 删除 `CodexPilot` provider 配置。
 - 移除根级 `OPENAI_API_KEY`。
@@ -179,7 +179,7 @@ npm run check
 - `cargo check`
 - `node scripts/test-renderer-inject.mjs`
 - `npm run check`
-- 真实 Codex 登录态下验证应用中转、启动、历史会话可见性和新会话请求。
+- 真实 Codex 登录态下验证混合中转保存、启动、历史会话可见性和新会话请求。
 - 检查日志、截图、测试数据中没有真实密钥。
 
 ## 打包与发布

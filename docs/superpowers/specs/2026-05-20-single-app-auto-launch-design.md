@@ -1,5 +1,17 @@
 # Single App Auto Launch Design
 
+## Status
+
+Superseded by the current single-manager launch workflow. The packaging and
+product direction from this document still applies: CodexPilot remains one
+visible app and `codex-pilot-launcher` remains an internal sidecar. The
+auto-launch-on-open preference described below is not part of the current
+implemented design because the manager is being simplified around explicit,
+user-triggered launch and save actions.
+
+Do not implement the preference switch from this document unless the product
+direction is reopened in a new spec.
+
 ## Goal
 
 CodexPilot should remain one visible product. Users should not see a second
@@ -17,23 +29,10 @@ when startup fails.
 
 ## User Experience
 
-The manager keeps its current entry point and navigation. A new launch
-preference controls automatic startup:
-
-```text
-启动 CodexPilot 时自动启动 Codex
-```
-
-When this preference is off, CodexPilot behaves as it does today.
-
-When it is on, opening CodexPilot runs the same checks as the current launch
-button. If startup and injection succeed, the manager should get out of the
-way. The default behavior should be to hide or minimize the manager window
-after successful launch, while keeping the helper and launcher lifecycle intact.
-
-If startup fails, the manager window must remain visible and show the failure in
-the launch or diagnostics area. Users should have an obvious place to inspect
-the reason and retry.
+The current implemented experience keeps the manager as the explicit entry
+point for launch and configuration. Users launch, reinject, restart, and save
+preferences from the manager UI. Startup failures remain visible in the launch
+or diagnostics area.
 
 ## Architecture
 
@@ -41,47 +40,31 @@ Keep the existing `codex-pilot-launcher` binary as an internal sidecar. It
 continues to own provider sync, Codex process startup, helper startup, and page
 injection.
 
-The Tauri manager owns the product entry point and the user-visible preference.
-On app startup, it loads launch preferences and decides whether to invoke the
-same launch path used by the existing button.
+The Tauri manager owns the product entry point and launch preferences. On app
+startup, it loads preferences and exposes the current launch snapshot without
+invoking Codex automatically.
 
 The frontend should not duplicate launch logic. It should call a backend command
-or receive a startup snapshot that reflects the auto-launch attempt.
-
-## Preference Model
-
-Extend launch preferences with a boolean field:
-
-```text
-auto_launch_on_open
-```
-
-Default value is `false` so existing users keep the current behavior after
-upgrade.
-
-The preference should be saved beside the existing launch settings. It should be
-visible in the launch view, near the existing app path and port controls.
+for explicit launch/reinject/restart actions, or receive a startup snapshot that
+reflects current readiness.
 
 ## Startup Flow
 
 1. Manager starts normally.
-2. Backend loads launch preferences.
-3. If `auto_launch_on_open` is false, no launch is attempted.
-4. If true, backend/frontend triggers the existing launch command once per app
-   startup.
-5. Existing launch command handles these cases:
+2. Backend loads launch preferences for app path and ports.
+3. No automatic launch is attempted on open.
+4. Manual launch handles these cases:
    - helper already running: mark as running and do not spawn another launcher.
    - debug port reachable: reinject.
    - unrelated Codex already running: surface the current "restart required"
      state instead of killing it automatically.
    - no Codex running: spawn the sidecar launcher.
-6. On success, the manager hides or minimizes itself.
-7. On failure, the manager stays visible and shows the error.
+5. On failure, the manager stays visible and shows the error.
 
 ## Error Handling
 
-Auto launch must be conservative. It must not close or restart an existing
-Codex process without explicit user confirmation.
+Launch must be conservative. It must not close or restart an existing Codex
+process without explicit user confirmation.
 
 Errors should be written to the existing diagnostic log. The launch view should
 show the latest failure message in the same style as manual launch failures.
@@ -101,10 +84,8 @@ No user-facing launcher app, shortcut, or second product name is added.
 
 ## Testing
 
-- Unit-test launch preference serialization with the new field and default.
-- Verify auto launch does not run when the preference is false.
-- Verify auto launch attempts exactly once when the preference is true.
+- Unit-test launch preference serialization.
+- Verify opening the manager does not launch Codex automatically.
 - Verify the existing manual launch button still works.
 - Verify failure states keep the manager visible and write diagnostics.
 - Run existing Rust tests and renderer injection tests.
-

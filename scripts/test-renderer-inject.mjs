@@ -332,6 +332,7 @@ async function deleteSelected(fixture) {
   assert.ok(root, "应创建 CodexPilot 浮动菜单");
   assert.equal(root.dataset.status, "unknown");
   assert.match(root.textContent, /Pilot|后端状态|导出 Markdown/);
+  assert.match(root.textContent, /CodexPilot|dev/);
   assert.doesNotMatch(root.textContent, /助手/);
   assert.ok(root.querySelector(".codex-pilot-status-dot"), "应显示 Pilot 状态点");
   assert.doesNotMatch(root.textContent, /当前会话|删除会话|撤销删除/);

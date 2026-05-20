@@ -170,6 +170,12 @@
         font-size: 13px;
       }
 
+      #${rootId} .codex-pilot-version {
+        color: #6b7788;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
       #${rootId} .codex-pilot-action {
         align-items: center;
         background: #f7f9fc;
@@ -282,6 +288,22 @@
       .${actionButtonClass}[data-danger="true"]:hover,
       .${archiveActionClass}[data-danger="true"]:hover {
         color: #ffffff;
+      }
+
+      .${archiveActionClass}.codex-pilot-archive-bar {
+        background: rgba(127, 29, 29, 0.92);
+        border: 1px solid rgba(255, 210, 210, 0.2);
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 700;
+        height: auto;
+        min-height: 30px;
+        padding: 0 10px;
+        width: auto;
+      }
+
+      .${archiveActionClass}.codex-pilot-archive-bar:hover {
+        background: rgba(153, 27, 27, 0.96);
       }
 
       .${actionButtonClass} svg,
@@ -1143,7 +1165,10 @@
 
     const title = document.createElement("div");
     title.className = "codex-pilot-title";
-    title.innerHTML = "<strong>CodexPilot</strong>";
+    const versionLabel = scriptVersion && !scriptVersion.includes("__")
+      ? scriptVersion
+      : "dev";
+    title.innerHTML = `<strong>CodexPilot</strong><span class="codex-pilot-version">${versionLabel}</span>`;
 
     const statusButton = document.createElement("button");
     statusButton.className = "codex-pilot-action";

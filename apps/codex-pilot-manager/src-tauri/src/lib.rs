@@ -107,8 +107,8 @@ enum ProviderProfileMode {
 impl ProviderProfileMode {
     fn label(self) -> &'static str {
         match self {
-            ProviderProfileMode::HybridApi => "混合 API",
-            ProviderProfileMode::Api => "纯 API",
+            ProviderProfileMode::HybridApi => "混合中转",
+            ProviderProfileMode::Api => "API 中转",
         }
     }
 }
@@ -159,6 +159,13 @@ struct ProviderProfileSaveRequest {
     bearer_token: String,
     mode: ProviderProfileMode,
     activate: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderProfileSaveResponse {
+    id: String,
+    message: String,
 }
 
 #[derive(Deserialize)]
@@ -390,11 +397,11 @@ async fn apply_provider(request: ProviderApplyRequest) -> Result<String, String>
                     &base_url,
                     &bearer_token,
                 )
-                .map_err(|error| format!("应用混合 API 失败：{error}"))?
+                .map_err(|error| format!("应用混合中转失败：{error}"))?
             }
             ProviderProfileMode::Api => {
                 codex_pilot_core::relay_config::apply_api_provider_config(&base_url, &bearer_token)
-                    .map_err(|error| format!("应用纯 API 失败：{error}"))?
+                    .map_err(|error| format!("应用 API 中转失败：{error}"))?
             }
         };
         let sync = codex_pilot_data::provider_sync::run_provider_sync(None);
@@ -412,7 +419,9 @@ async fn apply_provider(request: ProviderApplyRequest) -> Result<String, String>
 }
 
 #[tauri::command]
-fn save_provider_profile(request: ProviderProfileSaveRequest) -> Result<String, String> {
+fn save_provider_profile(
+    request: ProviderProfileSaveRequest,
+) -> Result<ProviderProfileSaveResponse, String> {
     let mut state = load_provider_profiles();
     let activate = request.activate;
     let profile = sanitize_provider_profile(request)?;
@@ -430,7 +439,10 @@ fn save_provider_profile(request: ProviderProfileSaveRequest) -> Result<String, 
         state.active_profile_id = id.clone();
     }
     save_provider_profiles_to_path(&provider_profiles_path(), &state)?;
-    Ok("中转配置档已保存。".to_string())
+    Ok(ProviderProfileSaveResponse {
+        id,
+        message: "中转配置档已保存。".to_string(),
+    })
 }
 
 #[tauri::command]

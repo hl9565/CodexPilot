@@ -22,7 +22,6 @@ import {
   Network,
   RotateCcw,
   Plus,
-  X,
 } from "lucide-react";
 import "./styles.css";
 
@@ -70,6 +69,11 @@ type ProviderProfile = {
 
 type RunMode = "official" | "hybridApi" | "api";
 type ProviderProfileMode = "hybridApi" | "api";
+
+type ProviderProfileSaveResponse = {
+  id: string;
+  message: string;
+};
 
 type DiagnosticCheck = {
   name: string;
@@ -381,12 +385,12 @@ function OverviewView({
         <dl className="metricGrid overviewMetrics">
           <Metric label="通道" value={providerMode} />
           <Metric label="官方登录" value={provider?.authenticated ? "已检测" : "未检测"} />
-          <Metric label="当前供应商" value={provider?.activeProvider ?? "未知"} />
           <Metric label="配置档" value={provider?.profile ?? "默认"} />
         </dl>
-        <div className="taskFooter">
+        <div className="accountLine">
           <span className={`statusDot ${provider?.authenticated ? "ok" : "warning"}`} />
-          <span>{provider?.accountLabel ?? "未读取到账号信息"}</span>
+          <span>登录账号</span>
+          <strong>{provider?.accountLabel ?? "未读取到账号信息"}</strong>
         </div>
       </section>
 
@@ -575,20 +579,24 @@ function ProviderView({
   const [baseUrl, setBaseUrl] = React.useState("");
   const [bearerToken, setBearerToken] = React.useState("");
   const [showToken, setShowToken] = React.useState(false);
+  const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState("");
   const currentMode = snapshotMode;
+  const visibleProfiles: ProviderProfile[] = isCreatingProfile
+    ? [{ id: "", name: profileName || "新中转", baseUrl, bearerToken, mode: "hybridApi" }]
+    : profiles;
 
   React.useEffect(() => {
     setSelectedChannel(snapshotMode === "official" ? "official" : "hybridApi");
   }, [snapshotMode]);
 
   React.useEffect(() => {
-    if (!activeProfile || editingId === "") return;
+    if (!activeProfile || isCreatingProfile) return;
     setEditingId(activeProfile.id);
     setProfileName(activeProfile.name);
     setBaseUrl(activeProfile.baseUrl);
     setBearerToken(activeProfile.bearerToken);
-  }, [activeProfile?.id, editingId]);
+  }, [activeProfile?.id, isCreatingProfile]);
 
   const saveMixedRelay = () => {
     if (pendingAction) return;
@@ -599,8 +607,7 @@ function ProviderView({
     setPendingAction("save");
     onProgress("正在保存混合中转");
     onMessage("正在保存混合中转");
-    const savingExistingProfile = Boolean(editingId);
-    invoke<string>("save_provider_profile", {
+    invoke<ProviderProfileSaveResponse>("save_provider_profile", {
       request: {
         id: editingId || null,
         name: profileName,
@@ -610,15 +617,13 @@ function ProviderView({
         activate: true,
       },
     })
-      .then((saveMessage) => {
-        if (!savingExistingProfile) {
-          onMessage(saveMessage);
-          onRefresh();
-          return null;
-        }
+      .then((saveResult) => {
+        setEditingId(saveResult.id);
+        setIsCreatingProfile(false);
+        onMessage(saveResult.message);
         return invoke<string>("apply_provider", {
           request: {
-            profileId: editingId,
+            profileId: saveResult.id,
             mode: "hybridApi",
           },
         });
@@ -641,6 +646,7 @@ function ProviderView({
     setBaseUrl("");
     setBearerToken("");
     setShowToken(false);
+    setIsCreatingProfile(true);
   };
 
   const selectProfile = (profile: ProviderProfile) => {
@@ -650,6 +656,7 @@ function ProviderView({
         setProfileName(profile.name);
         setBaseUrl(profile.baseUrl);
         setBearerToken(profile.bearerToken);
+        setIsCreatingProfile(false);
         onMessage(message);
         onRefresh();
       })
@@ -661,10 +668,15 @@ function ProviderView({
       onMessage("请选择要删除的配置档");
       return;
     }
+    const name = profileName.trim() || activeProfile?.name || "当前配置档";
+    if (!window.confirm(`确定删除“${name}”？删除后会自动切换到其他配置档。`)) {
+      return;
+    }
     invoke<string>("delete_provider_profile", { request: { id: editingId } })
       .then((message) => {
         onMessage(message);
         setEditingId("");
+        setIsCreatingProfile(false);
         onRefresh();
       })
       .catch((error) => onMessage(String(error)));
@@ -702,11 +714,18 @@ function ProviderView({
           <code>{provider?.source ?? "~/.codex/config.toml"}</code>
         </div>
         <div className="providerStatusGrid">
-          <Metric label="官方登录" value={provider?.authenticated ? `已检测${provider.accountLabel ? ` ${provider.accountLabel}` : ""}` : "未检测"} />
+          <div className="statusMetric">
+            <span>官方登录</span>
+            <strong>{provider?.authenticated ? "已检测" : "未检测"}</strong>
+          </div>
           <Metric label="当前通道" value={runModeLabel(currentMode)} />
-          <Metric label="当前供应商" value={provider?.activeProvider ?? "未知"} />
           <Metric label="配置档" value={provider?.profile ?? "默认"} />
           <Metric label="已配置" value={provider?.configured ? "是" : "否"} />
+        </div>
+        <div className="accountLine">
+          <span className={`statusDot ${provider?.authenticated ? "ok" : "warning"}`} />
+          <span>登录账号</span>
+          <strong>{provider?.accountLabel ?? "未读取到账号信息"}</strong>
         </div>
       </section>
 
@@ -720,7 +739,7 @@ function ProviderView({
         </div>
         <div className="modeGrid">
           <ModeCard
-            active={currentMode === "official"}
+            active={selectedChannel === "official"}
             description="使用 Codex/ChatGPT 官方登录，不写入自定义模型供应商。"
             disabled={Boolean(pendingAction)}
             icon={BadgeCheck}
@@ -728,7 +747,7 @@ function ProviderView({
             title="官方通道"
           />
           <ModeCard
-            active={customChannelSelected}
+            active={selectedChannel === "hybridApi"}
             description="保留 Codex/ChatGPT 登录，把模型请求转到当前 API 配置。"
             disabled={Boolean(pendingAction)}
             icon={Network}
@@ -745,17 +764,21 @@ function ProviderView({
             <h2>配置档</h2>
           </div>
           <div className="profileList">
-            {(profiles.length ? profiles : [{ id: "", name: profileName || "新中转", baseUrl, bearerToken, mode: "hybridApi" as ProviderProfileMode }]).map((profile) => {
-              const selected = profile.id === activeProfileId || (!profile.id && !editingId);
+            {visibleProfiles.map((profile) => {
+              const selected = isCreatingProfile ? !profile.id : profile.id === activeProfileId;
               return (
                 <div className={`profileItem ${selected ? "active" : ""}`} key={profile.id || "new"}>
-                  <button className="profileDelete" onClick={deleteProfile} title="删除配置" type="button">
-                    <X size={14} />
-                  </button>
-                  <button className="profileSelectArea" onClick={() => profile.id && selectProfile(profile)} type="button">
-                    <strong>{profile.name || "新中转"}</strong>
-                    <span>{selected ? "当前应用中 · 混合中转" : `混合中转 · ${profile.baseUrl || "未填写 Base URL"}`}</span>
-                  </button>
+                  <div className="profileItemHeader">
+                    <button className="profileSelectArea" onClick={() => profile.id && selectProfile(profile)} type="button">
+                      <strong>{profile.name || "新中转"}</strong>
+                      <span>{selected ? "当前配置 · 混合中转" : `混合中转 · ${profile.baseUrl || "未填写 Base URL"}`}</span>
+                    </button>
+                    {selected && editingId && (
+                      <button className="profileDelete" onClick={deleteProfile} type="button">
+                        删除
+                      </button>
+                    )}
+                  </div>
                   {selected && (
                     <>
                       <div className="profileFormGrid">
@@ -942,7 +965,7 @@ function RecycleBinView({
             onClick={restoreSelected}
             type="button"
           >
-            {pendingAction === "restore" ? "恢复中" : "恢复所选"}
+            {pendingAction === "restore" ? "恢复中" : "恢复可恢复项"}
           </button>
           <button
             className="dangerButton"
