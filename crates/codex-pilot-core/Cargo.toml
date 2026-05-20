@@ -1,0 +1,18 @@
+[package]
+name = "codex-pilot-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+codex-pilot-data = { path = "../codex-pilot-data" }
+directories.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+url.workspace = true

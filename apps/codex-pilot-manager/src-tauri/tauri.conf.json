@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CodexPilot",
+  "version": "0.9.0",
+  "identifier": "com.hl9565.codexpilot",
+  "build": {
+    "beforeDevCommand": "npm run vite:dev",
+    "beforeBuildCommand": "npm run vite:build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "CodexPilot",
+        "width": 1120,
+        "height": 760,
+        "minWidth": 980,
+        "minHeight": 680
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "publisher": "hl9565",
+    "category": "DeveloperTool",
+    "shortDescription": "Codex 外部增强桌面工具",
+    "longDescription": "CodexPilot 是面向 Codex 的外部启动器和管理器，提供启动注入、会话操作、中转配置和诊断日志。",
+    "copyright": "Copyright (c) 2026 hl9565",
+    "icon": ["icons/icon.png"],
+    "externalBin": ["binaries/codex-pilot-launcher"],
+    "macOS": {
+      "bundleName": "CodexPilot",
+      "minimumSystemVersion": "12.0",
+      "hardenedRuntime": false,
+      "dmg": {
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        }
+      }
+    }
+  }
+}

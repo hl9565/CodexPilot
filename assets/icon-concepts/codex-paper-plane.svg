@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="appTile" x1="142" y1="94" x2="884" y2="930" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.58" stop-color="#f7f7f5"/>
+      <stop offset="1" stop-color="#eceae6"/>
+    </linearGradient>
+    <radialGradient id="appTileSheen" cx="0.3" cy="0.12" r="0.76">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.82"/>
+      <stop offset="0.58" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="appTileShadow" x="-12%" y="-12%" width="124%" height="124%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000000" flood-opacity="0.2"/>
+    </filter>
+    <linearGradient id="plane" x1="300" y1="244" x2="768" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#b8adff"/>
+      <stop offset="0.26" stop-color="#7ab4ff"/>
+      <stop offset="0.62" stop-color="#4f7cff"/>
+      <stop offset="1" stop-color="#2f24f4"/>
+    </linearGradient>
+    <linearGradient id="planeShade" x1="364" y1="390" x2="744" y2="678" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.24"/>
+      <stop offset="0.54" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#1e1b4b" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="458" y1="456" x2="654" y2="650" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.52"/>
+      <stop offset="0.48" stop-color="#dbe7ff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#1d4ed8" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="274" y1="224" x2="774" y2="762" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.74"/>
+      <stop offset="0.48" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#172554" stop-opacity="0.24"/>
+    </linearGradient>
+    <filter id="planeShadow" x="-24%" y="-24%" width="148%" height="148%">
+      <feDropShadow dx="0" dy="28" stdDeviation="24" flood-color="#1e1b4b" flood-opacity="0.34"/>
+    </filter>
+  </defs>
+
+  <rect x="74" y="74" width="876" height="876" rx="190" fill="url(#appTile)" filter="url(#appTileShadow)"/>
+  <rect x="98" y="98" width="828" height="828" rx="166" fill="url(#appTileSheen)"/>
+  <rect x="75" y="75" width="874" height="874" rx="189" fill="none" stroke="#d8d6d0" stroke-opacity="0.72" stroke-width="2"/>
+
+  <g filter="url(#planeShadow)">
+    <path d="M204 532 822 226 631 813 505 598 325 730 400 571 204 532z" fill="url(#plane)"/>
+    <path d="M204 532 822 226 631 813 505 598 325 730 400 571 204 532z" fill="url(#planeShade)"/>
+    <path d="M400 571 822 226 505 598 631 813z" fill="url(#fold)" opacity="0.95"/>
+    <path d="M325 730 400 571 505 598z" fill="#ffffff" opacity="0.16"/>
+    <path d="M204 532 822 226 631 813 505 598 325 730 400 571 204 532z" fill="none" stroke="url(#rim)" stroke-width="16" stroke-linejoin="round"/>
+    <path d="M400 571 822 226 505 598" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" opacity="0.38"/>
+  </g>
+</svg>
