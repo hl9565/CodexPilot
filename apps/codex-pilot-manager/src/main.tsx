@@ -1076,6 +1076,19 @@ function RecycleBinView({
   };
 
   const providerOptions = syncSnapshot?.availableProviders ?? ["CodexPilot"];
+  const syncPending = syncSnapshot
+    ? syncSnapshot.rolloutRewriteNeeded + syncSnapshot.sqliteProviderRowsNeedingSync
+    : 0;
+  const syncStatusTitle = !syncSnapshot
+    ? "尚未检查历史会话"
+    : syncPending > 0
+      ? "历史会话需要同步"
+      : "历史会话记录一致";
+  const syncStatusDetail = !syncSnapshot
+    ? "选择目标归属后预览影响，再决定是否同步。"
+    : syncPending > 0
+      ? `预计更新 ${syncSnapshot.rolloutRewriteNeeded} 个原始会话文件、${syncSnapshot.sqliteProviderRowsNeedingSync} 条本地索引记录。`
+      : `${syncSnapshot.rolloutFiles} 个原始会话文件、${syncSnapshot.sqliteRows} 条本地索引记录已对齐。`;
 
   return (
     <div className="sessionsLayout">
@@ -1204,16 +1217,32 @@ function RecycleBinView({
             </label>
           )}
         </div>
-        <div className="syncSummaryGrid">
-          <Metric label="目标" value={selectedSyncTarget || "CodexPilot"} />
-          <Metric label="当前配置" value={syncSnapshot?.currentProvider ?? "-"} />
-          <Metric label="rollout 待改" value={`${syncSnapshot?.rolloutRewriteNeeded ?? 0}/${syncSnapshot?.rolloutFiles ?? 0}`} />
-          <Metric label="SQLite 待改" value={`${syncSnapshot?.sqliteProviderRowsNeedingSync ?? 0}/${syncSnapshot?.sqliteRows ?? 0}`} />
+        <div className={`syncStatusCard ${syncPending > 0 ? "needsSync" : "ok"}`}>
+          <div>
+            <span className="syncStatusIcon">
+              {syncPending > 0 ? <RefreshCw size={16} /> : <CheckCircle2 size={16} />}
+            </span>
+            <div>
+              <strong>{syncStatusTitle}</strong>
+              <p>{syncStatusDetail}</p>
+            </div>
+          </div>
+          <dl>
+            <Metric label="目标归属" value={selectedSyncTarget || "CodexPilot"} />
+            <Metric label="当前配置" value={syncSnapshot?.currentProvider ?? "-"} />
+          </dl>
         </div>
-        <div className="providerDistribution">
-          <Distribution title="rollout 分布" items={syncSnapshot?.rolloutProviders ?? []} />
-          <Distribution title="SQLite 分布" items={syncSnapshot?.sqliteProviders ?? []} />
-        </div>
+        <details className="syncDetails">
+          <summary>查看技术详情</summary>
+          <div className="syncSummaryGrid">
+            <Metric label="原始文件待改" value={`${syncSnapshot?.rolloutRewriteNeeded ?? 0}/${syncSnapshot?.rolloutFiles ?? 0}`} />
+            <Metric label="本地索引待改" value={`${syncSnapshot?.sqliteProviderRowsNeedingSync ?? 0}/${syncSnapshot?.sqliteRows ?? 0}`} />
+          </div>
+          <div className="providerDistribution">
+            <Distribution title="原始会话文件分布" items={syncSnapshot?.rolloutProviders ?? []} />
+            <Distribution title="本地索引记录分布" items={syncSnapshot?.sqliteProviders ?? []} />
+          </div>
+        </details>
       </div>
     </section>
     </div>

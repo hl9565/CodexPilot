@@ -724,6 +724,91 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
 }
 
+.syncStatusCard {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e7ee;
+  border-radius: 7px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.syncStatusCard > div {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.syncStatusCard strong {
+  color: #1d2630;
+  display: block;
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.syncStatusCard p {
+  color: #637183;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 3px 0 0;
+}
+
+.syncStatusCard dl {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  margin: 0;
+  min-width: 220px;
+}
+
+.syncStatusIcon {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  margin-top: 1px;
+  width: 28px;
+}
+
+.syncStatusCard.ok .syncStatusIcon {
+  background: #ecfdf3;
+  color: #15803d;
+}
+
+.syncStatusCard.needsSync .syncStatusIcon {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.syncDetails {
+  border-top: 1px solid #e6ebf2;
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.syncDetails summary {
+  border-radius: 6px;
+  color: #526071;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  outline: none;
+}
+
+.syncDetails[open] summary {
+  margin-bottom: 10px;
+}
+
+.syncDetails summary:focus-visible {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+
 .providerDistribution {
   display: grid;
   gap: 10px;
@@ -1265,9 +1350,15 @@ dd {
   .modeGrid,
   .overviewMetrics,
   .metricGrid,
+  .syncStatusCard,
   .row,
   .checkRow {
     grid-template-columns: 1fr;
+  }
+
+  .syncStatusCard dl {
+    grid-template-columns: 1fr;
+    min-width: 0;
   }
 
   .taskHeader {
