@@ -104,6 +104,10 @@ Before running sync, the UI should show an inspection summary:
 
 Running sync requires an explicit user action. The backend continues to create
 Provider Sync backups under `~/.codex/backups_state/provider-sync/`.
+Rollout metadata backups must stay compact and must not copy conversation
+content: `session-meta-backup.json` stores each changed rollout path and its
+original first `session_meta` line only. It must not store the rest of the
+rollout file.
 
 ## Copy
 

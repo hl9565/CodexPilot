@@ -161,6 +161,8 @@ impl SQLiteStorageAdapter {
         let mut db = Connection::open(&self.db_path)?;
         restore_tables(&mut db, &payload.tables)?;
         restore_files(&payload.tables)?;
+        fs::remove_file(&backup_path)
+            .with_context(|| format!("delete restored undo backup {}", backup_path.display()))?;
         Ok(DeleteResult {
             status: DeleteStatus::Undone,
             session_id: payload.session_id,
@@ -1313,6 +1315,8 @@ mod tests {
 
         let undo = adapter.undo(&token).unwrap();
         assert_eq!(undo.status, DeleteStatus::Undone);
+        assert!(!adapter.backup_path(&token).unwrap().exists());
+        assert!(adapter.list_undo_backups().unwrap().is_empty());
         let db = Connection::open(&db_path).unwrap();
         let title: String = db
             .query_row("SELECT title FROM sessions WHERE id = 's1'", [], |row| {
@@ -1416,6 +1420,7 @@ mod tests {
 
         let undo = adapter.undo(&token).unwrap();
         assert_eq!(undo.status, DeleteStatus::Undone);
+        assert!(!adapter.backup_path(&token).unwrap().exists());
 
         let db = Connection::open(&db_path).unwrap();
         let count: i64 = db
@@ -1517,6 +1522,7 @@ mod tests {
 
         let undo = adapter.undo(&token).unwrap();
         assert_eq!(undo.status, DeleteStatus::Undone);
+        assert!(!adapter.backup_path(&token).unwrap().exists());
         assert_eq!(fs::read_to_string(&rollout_path).unwrap(), "rollout data");
         let db = Connection::open(&db_path).unwrap();
         let count: i64 = db

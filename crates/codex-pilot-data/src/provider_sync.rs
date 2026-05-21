@@ -478,7 +478,6 @@ fn create_backup(
             json!({
                 "path": change.path.to_string_lossy(),
                 "originalFirstLine": change.original_first_line,
-                "separator": change.separator,
             })
         })
         .collect::<Vec<_>>();
@@ -906,6 +905,29 @@ mod tests {
             global_state["active-workspace-roots"],
             json!("C:/workspace")
         );
+
+        let manifest = serde_json::from_str::<Value>(
+            &fs::read_to_string(
+                result
+                    .backup_dir
+                    .as_ref()
+                    .unwrap()
+                    .join("session-meta-backup.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let manifest_items = manifest.as_array().unwrap();
+        assert_eq!(manifest_items.len(), 1);
+        assert_eq!(
+            manifest_items[0]["path"],
+            rollout.to_string_lossy().to_string()
+        );
+        assert!(manifest_items[0].get("originalFirstLine").is_some());
+        assert!(manifest_items[0].get("separator").is_none());
+        let manifest_text = serde_json::to_string(&manifest).unwrap();
+        assert!(!manifest_text.contains("user_message"));
+        assert!(!manifest_text.contains("hello"));
 
         let _ = fs::remove_dir_all(home);
     }
