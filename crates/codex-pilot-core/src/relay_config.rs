@@ -207,10 +207,7 @@ pub fn clear_relay_provider_config_from_path(
     let backup_path = backup_existing_config(config_path, &existing)?;
     let without_relay = remove_table(&existing, &format!("model_providers.{RELAY_PROVIDER}"));
     let without_key = remove_root_key(&without_relay, "OPENAI_API_KEY");
-    let updated = upsert_root_keys(
-        &without_key,
-        &[("model_provider", "\"chatgpt\"".to_string())],
-    );
+    let updated = remove_root_key(&without_key, "model_provider");
     std::fs::write(config_path, updated)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
 
@@ -753,12 +750,9 @@ base_url = "http://127.0.0.1:8000"
 
         let without_relay = remove_table(contents, &format!("model_providers.{RELAY_PROVIDER}"));
         let without_key = remove_root_key(&without_relay, "OPENAI_API_KEY");
-        let updated = upsert_root_keys(
-            &without_key,
-            &[("model_provider", "\"chatgpt\"".to_string())],
-        );
+        let updated = remove_root_key(&without_key, "model_provider");
 
-        assert!(updated.contains("model_provider = \"chatgpt\""));
+        assert!(!updated.contains("model_provider ="));
         assert!(!updated.contains("[model_providers.CodexPilot]"));
         assert!(!updated.contains("OPENAI_API_KEY"));
         assert!(updated.contains("[model_providers.other]"));
@@ -790,7 +784,7 @@ base_url = "http://127.0.0.1:8000"
         assert!(!clear.configured);
         assert!(PathBuf::from(clear.backup_path.unwrap()).exists());
         let final_contents = std::fs::read_to_string(&config_path).unwrap();
-        assert!(final_contents.contains("model_provider = \"chatgpt\""));
+        assert!(!final_contents.contains("model_provider ="));
 
         std::fs::remove_dir_all(root).unwrap();
     }

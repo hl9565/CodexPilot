@@ -81,7 +81,7 @@ When you choose Official Channel and save, CodexPilot will:
 
 - remove the `CodexPilot` provider configuration;
 - remove root-level `OPENAI_API_KEY`;
-- switch `model_provider` back to `chatgpt`;
+- remove root-level `model_provider` so Codex uses its default official channel;
 - keep a configuration backup before writing.
 
 If you manually added a root-level `OPENAI_API_KEY` in `~/.codex/config.toml`, switching back to Official Channel will remove it too. CodexPilot keeps a backup before writing.

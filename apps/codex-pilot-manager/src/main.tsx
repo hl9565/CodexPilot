@@ -110,10 +110,12 @@ type RecycleBinEntry = {
   token: string;
   sessionId: string;
   title: string | null;
+  projectCwd: string | null;
   schema: string;
   dbPath: string;
   backupPath: string;
   deletedAt: number | null;
+  lastActiveAt: number | null;
   recoverable: boolean;
   status: string;
 };
@@ -966,6 +968,7 @@ function RecycleBinView({
   const [syncSnapshot, setSyncSnapshot] = React.useState<ProviderSyncSnapshot | null>(null);
   const [syncTarget, setSyncTarget] = React.useState("CodexPilot");
   const [customSyncTarget, setCustomSyncTarget] = React.useState("");
+  const [syncInspecting, setSyncInspecting] = React.useState(false);
   const [syncBusy, setSyncBusy] = React.useState(false);
   const selectedEntries = entries.filter((entry) => selected.includes(entry.token));
   const recoverableSelected = selectedEntries.filter((entry) => entry.recoverable);
@@ -973,7 +976,7 @@ function RecycleBinView({
   const selectedSyncTarget = syncTarget === "__custom" ? customSyncTarget.trim() : syncTarget;
 
   const refreshProviderSync = React.useCallback((target = "CodexPilot") => {
-    callBackend<ProviderSyncSnapshot>("provider_sync_snapshot", {
+    return callBackend<ProviderSyncSnapshot>("provider_sync_snapshot", {
       request: { targetProvider: target || "CodexPilot" },
     })
       .then((snapshot) => {
@@ -981,16 +984,17 @@ function RecycleBinView({
         if (syncTarget !== "__custom") {
           setSyncTarget(snapshot.targetProvider || "CodexPilot");
         }
-      })
-      .catch((error) => onMessage(`检查对话归属失败：${String(error)}`));
-  }, [onMessage, syncTarget]);
+        return snapshot;
+      });
+  }, [syncTarget]);
 
   React.useEffect(() => {
     setSelected((current) => current.filter((token) => entries.some((entry) => entry.token === token)));
   }, [entries]);
 
   React.useEffect(() => {
-    refreshProviderSync("CodexPilot");
+    refreshProviderSync("CodexPilot")
+      .catch((error) => onMessage(`检查对话归属失败：${String(error)}`));
   }, []);
 
   const toggleAll = () => {
@@ -1047,9 +1051,14 @@ function RecycleBinView({
   };
 
   const inspectProviderSync = () => {
+    if (syncInspecting) return;
     const target = selectedSyncTarget || "CodexPilot";
-    refreshProviderSync(target);
+    setSyncInspecting(true);
     onMessage(`正在检查对话归属：${target}`);
+    refreshProviderSync(target)
+      .then((snapshot) => onMessage(`检查完成：${providerSyncSummary(snapshot)}`))
+      .catch((error) => onMessage(`检查对话归属失败：${String(error)}`))
+      .finally(() => setSyncInspecting(false));
   };
 
   const runProviderSync = () => {
@@ -1089,6 +1098,15 @@ function RecycleBinView({
     : syncPending > 0
       ? `预计更新 ${syncSnapshot.rolloutRewriteNeeded} 个原始会话文件、${syncSnapshot.sqliteProviderRowsNeedingSync} 条本地索引记录。`
       : `${syncSnapshot.rolloutFiles} 个原始会话文件、${syncSnapshot.sqliteRows} 条本地索引记录已对齐。`;
+
+  const recycleTooltip = (entry: RecycleBinEntry) => [
+    `标题：${entry.title || "未命名会话"}`,
+    `项目：${entry.projectCwd || "未知项目"}`,
+    `会话 ID：${entry.sessionId || "-"}`,
+    `备份：${entry.backupPath || "-"}`,
+    `类型：${schemaLabel(entry.schema)}`,
+    `状态：${entry.status || (entry.recoverable ? "可恢复" : "不可恢复")}`,
+  ].join("\n");
 
   return (
     <div className="sessionsLayout">
@@ -1135,37 +1153,48 @@ function RecycleBinView({
                   />
                 </th>
                 <th>标题</th>
-                <th>会话 ID</th>
                 <th>来源</th>
+                <th>最后活跃</th>
                 <th>删除时间</th>
                 <th>状态</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
-                <tr key={entry.token}>
-                  <td>
-                    <input
-                      checked={selected.includes(entry.token)}
-                      onChange={() => toggleOne(entry.token)}
-                      type="checkbox"
-                      aria-label={`选择 ${entry.title || entry.sessionId}`}
-                    />
-                  </td>
-                  <td>
-                    <strong>{entry.title || "未命名会话"}</strong>
-                    <span>{entry.backupPath}</span>
-                  </td>
-                  <td><code>{shortId(entry.sessionId)}</code></td>
-                  <td>{entry.schema || "未知"}</td>
-                  <td>{formatDeletedAt(entry.deletedAt)}</td>
-                  <td>
-                    <span className={`pill ${entry.recoverable ? "ok" : "warning"}`}>
-                      {entry.status || (entry.recoverable ? "可恢复" : "不可恢复")}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {entries.map((entry) => {
+                const title = entry.title || "未命名会话";
+                const project = projectLabel(entry.projectCwd);
+                const deletedAt = formatTimestamp(entry.deletedAt);
+                const lastActiveAt = formatTimestamp(entry.lastActiveAt);
+                return (
+                  <tr key={entry.token} title={recycleTooltip(entry)}>
+                    <td>
+                      <input
+                        checked={selected.includes(entry.token)}
+                        onChange={() => toggleOne(entry.token)}
+                        type="checkbox"
+                        aria-label={`选择 ${title}`}
+                      />
+                    </td>
+                    <td>
+                      <span className="cellText strong" title={title}>{title}</span>
+                    </td>
+                    <td>
+                      <span className="cellText" title={entry.projectCwd || project}>{project}</span>
+                    </td>
+                    <td>
+                      <span className="cellText mono" title={lastActiveAt}>{lastActiveAt}</span>
+                    </td>
+                    <td>
+                      <span className="cellText mono" title={deletedAt}>{deletedAt}</span>
+                    </td>
+                    <td>
+                      <span className={`pill ${entry.recoverable ? "ok" : "warning"}`} title={entry.status}>
+                        {entry.status || (entry.recoverable ? "可恢复" : "不可恢复")}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1180,9 +1209,9 @@ function RecycleBinView({
           <h2>对话归属同步</h2>
         </div>
         <div className="buttonRow">
-          <button className="secondary" onClick={inspectProviderSync} type="button">
+          <button className="secondary" disabled={syncInspecting} onClick={inspectProviderSync} type="button">
             <RefreshCw size={16} />
-            预览影响
+            {syncInspecting ? "检查中" : "预览影响"}
           </button>
           <button className="primary" disabled={syncBusy} onClick={runProviderSync} type="button">
             <RefreshCw size={16} />
@@ -1193,22 +1222,14 @@ function RecycleBinView({
       <div className="syncTool">
         <div className="syncControls">
           <label>
-            <span className="labelWithHelp">
-              目标 Provider
-              <button
-                className="helpDot"
-                title="将历史对话的 provider 归属统一改成这个值。CodexPilot 是默认中转归属；选择其他值前建议先预览影响。"
-                type="button"
-              >
-                ?
-              </button>
-            </span>
+            <span>目标 Provider</span>
             <select value={syncTarget} onChange={(event) => setSyncTarget(event.target.value)}>
               {providerOptions.map((provider) => (
                 <option key={provider} value={provider}>{provider}</option>
               ))}
               <option value="__custom">自定义</option>
             </select>
+            <span className="fieldHint">将历史对话归属统一到这个 Provider；操作前可先预览影响。</span>
           </label>
           {syncTarget === "__custom" && (
             <label>
@@ -1391,7 +1412,7 @@ function shortId(value: string) {
   return `${value.slice(0, 8)}…${value.slice(-8)}`;
 }
 
-function formatDeletedAt(value: number | null) {
+function formatTimestamp(value: number | null) {
   if (!value) return "-";
   return new Date(value * 1000).toLocaleString("zh-CN", {
     month: "2-digit",
@@ -1399,6 +1420,25 @@ function formatDeletedAt(value: number | null) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function projectLabel(cwd: string | null) {
+  if (!cwd) return "未知项目";
+  const normalized = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts[parts.length - 1] || cwd;
+}
+
+function schemaLabel(schema: string) {
+  if (schema === "codex_threads") return "Codex 对话";
+  if (schema === "generic_sessions") return "旧版会话";
+  return schema || "未知";
+}
+
+function providerSyncSummary(snapshot: ProviderSyncSnapshot) {
+  const pending = snapshot.rolloutRewriteNeeded + snapshot.sqliteProviderRowsNeedingSync;
+  if (pending > 0) return `预计影响 ${pending} 项`;
+  return "历史会话记录一致";
 }
 
 function ProgressDialog({ message }: { message: string }) {

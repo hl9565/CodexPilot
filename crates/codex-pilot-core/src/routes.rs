@@ -40,6 +40,7 @@ pub async fn handle_bridge_request(ctx: BridgeContext, path: &str, payload: Valu
         "/session/recycle-bin/restore" => undo_session(ctx, payload).await,
         "/session/recycle-bin/delete" => delete_recycle_bin_entry(ctx, payload).await,
         "/session/export-markdown" => export_markdown(ctx, payload).await,
+        "/session/export-html" => export_html(ctx, payload).await,
         "/session/archived-thread" => archived_thread(ctx, payload).await,
         "/session/move-workspace" => move_thread_workspace(ctx, payload).await,
         "/session/thread-sort-key" => thread_sort_key(ctx, payload).await,
@@ -114,7 +115,20 @@ async fn export_markdown(ctx: BridgeContext, payload: Value) -> Value {
         return failed("missing session id");
     };
     let service = codex_pilot_data::markdown::MarkdownExportService::new(ctx.db_path);
-    tokio::task::spawn_blocking(move || service.export(&session))
+    tokio::task::spawn_blocking(move || service.export_markdown(&session))
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|result| result.map_err(|error| error.to_string()))
+        .map(|result| json!({"status": "ok", "result": result}))
+        .unwrap_or_else(|message| failed(message))
+}
+
+async fn export_html(ctx: BridgeContext, payload: Value) -> Value {
+    let Some(session) = session_ref_from_payload(&payload) else {
+        return failed("missing session id");
+    };
+    let service = codex_pilot_data::markdown::MarkdownExportService::new(ctx.db_path);
+    tokio::task::spawn_blocking(move || service.export_html(&session))
         .await
         .map_err(|error| error.to_string())
         .and_then(|result| result.map_err(|error| error.to_string()))
@@ -358,6 +372,65 @@ mod tests {
 
         assert_eq!(result["status"], "ok");
         assert!(result["result"].as_array().is_some());
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[tokio::test]
+    async fn recycle_bin_entries_use_camel_case_fields() {
+        let db_path = std::env::temp_dir().join(format!(
+            "codex-pilot-core-recycle-camel-{}.sqlite",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let backup_dir = db_path.parent().unwrap().join(".codex-pilot-undo");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        let backup_path = backup_dir.join("s1-1.json");
+        std::fs::write(
+            &backup_path,
+            serde_json::to_vec(&json!({
+                "session_id": "s1",
+                "db_path": db_path,
+                "schema": "codex_threads",
+                "tables": {
+                    "threads": [{
+                        "id": "s1",
+                        "title": "Fixture",
+                        "cwd": "/Users/huanglin/code/github/CodexPilot",
+                        "updated_at_ms": 1770000000000u64,
+                        "rollout_path": "/tmp/rollout.jsonl"
+                    }]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let result = handle_bridge_request(
+            BridgeContext {
+                debug_port: 9688,
+                helper_port: 58888,
+                db_path: db_path.clone(),
+            },
+            "/session/recycle-bin/list",
+            json!({}),
+        )
+        .await;
+
+        let entry = &result["result"][0];
+        assert_eq!(entry["sessionId"], "s1");
+        assert_eq!(entry["projectCwd"], "/Users/huanglin/code/github/CodexPilot");
+        assert_eq!(entry["lastActiveAt"], 1770000000u64);
+        assert!(entry.get("session_id").is_none());
+        assert!(entry.get("deletedAt").is_some());
+        assert!(entry.get("last_active_at").is_none());
+        assert!(entry.get("deleted_at").is_none());
+        assert!(entry.get("backupPath").is_some());
+        assert!(entry.get("backup_path").is_none());
+
+        let _ = std::fs::remove_file(backup_path);
+        let _ = std::fs::remove_dir_all(backup_dir);
         let _ = std::fs::remove_file(db_path);
     }
 }

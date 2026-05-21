@@ -81,7 +81,7 @@ experimental_bearer_token = "sk-..."
 
 - 删除 `CodexPilot` provider 配置。
 - 移除根级 `OPENAI_API_KEY`。
-- 将 `model_provider` 切回 `chatgpt`。
+- 移除根级 `model_provider`，让 Codex 使用默认官方通道。
 - 写入前保留配置备份。
 
 如果你原本手动在 `~/.codex/config.toml` 根级写过 `OPENAI_API_KEY`，切回官方通道也会移除它。写入前会保留配置备份。

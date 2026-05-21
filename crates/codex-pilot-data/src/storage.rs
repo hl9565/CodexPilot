@@ -52,14 +52,17 @@ impl DeleteResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct RecycleBinEntry {
     pub token: String,
     pub session_id: String,
     pub title: Option<String>,
+    pub project_cwd: Option<String>,
     pub schema: String,
     pub db_path: PathBuf,
     pub backup_path: PathBuf,
     pub deleted_at: Option<u64>,
+    pub last_active_at: Option<u64>,
     pub recoverable: bool,
     pub status: String,
 }
@@ -578,10 +581,12 @@ impl SQLiteStorageAdapter {
                     token,
                     session_id: payload.session_id,
                     title: backup_title(&payload.tables),
+                    project_cwd: backup_project_cwd(&payload.tables),
                     schema: payload.schema,
                     db_path: payload.db_path,
                     backup_path: path.to_path_buf(),
                     deleted_at,
+                    last_active_at: backup_last_active_at(&payload.tables),
                     recoverable: db_matches,
                     status: if db_matches {
                         "可恢复".to_string()
@@ -594,10 +599,12 @@ impl SQLiteStorageAdapter {
                 session_id: token_session_id(&token),
                 token,
                 title: None,
+                project_cwd: None,
                 schema: "unknown".to_string(),
                 db_path: self.db_path.clone(),
                 backup_path: path.to_path_buf(),
                 deleted_at,
+                last_active_at: None,
                 recoverable: false,
                 status: "备份无法解析".to_string(),
             },
@@ -1018,6 +1025,92 @@ fn backup_title(tables: &Map<String, Value>) -> Option<String> {
             .filter(|title| !title.is_empty())
             .map(ToString::to_string)
     })
+}
+
+fn backup_project_cwd(tables: &Map<String, Value>) -> Option<String> {
+    backup_first_row(tables, "threads")
+        .and_then(|row| row.get("cwd"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|cwd| !cwd.is_empty())
+        .map(ToString::to_string)
+}
+
+fn backup_last_active_at(tables: &Map<String, Value>) -> Option<u64> {
+    let row = backup_first_row(tables, "threads")?;
+    ["updated_at_ms", "updated_at", "created_at_ms"]
+        .iter()
+        .find_map(|column| timestamp_seconds(row.get(*column)?))
+}
+
+fn backup_first_row<'a>(tables: &'a Map<String, Value>, table: &str) -> Option<&'a Map<String, Value>> {
+    tables
+        .get(table)
+        .and_then(Value::as_array)
+        .and_then(|rows| rows.first())
+        .and_then(Value::as_object)
+}
+
+fn timestamp_seconds(value: &Value) -> Option<u64> {
+    match value {
+        Value::Number(number) => number
+            .as_u64()
+            .map(|value| if value > 10_000_000_000 { value / 1000 } else { value }),
+        Value::String(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else if let Ok(number) = trimmed.parse::<u64>() {
+                Some(if number > 10_000_000_000 { number / 1000 } else { number })
+            } else {
+                parse_rfc3339_seconds(trimmed)
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_rfc3339_seconds(value: &str) -> Option<u64> {
+    let date_time = value.strip_suffix('Z').unwrap_or(value);
+    let (date, time) = date_time.split_once('T')?;
+    let mut date_parts = date.split('-');
+    let year = date_parts.next()?.parse::<i64>().ok()?;
+    let month = date_parts.next()?.parse::<u32>().ok()?;
+    let day = date_parts.next()?.parse::<u32>().ok()?;
+    let time = time.split(['+', '-']).next().unwrap_or(time);
+    let mut time_parts = time.split(':');
+    let hour = time_parts.next()?.parse::<u64>().ok()?;
+    let minute = time_parts.next()?.parse::<u64>().ok()?;
+    let second = time_parts
+        .next()
+        .and_then(|part| part.split('.').next())
+        .unwrap_or("0")
+        .parse::<u64>()
+        .ok()?;
+    let days = days_from_civil(year, month, day)?;
+    u64::try_from(days).ok()?.checked_mul(86_400)?
+        .checked_add(hour.checked_mul(3_600)?)?
+        .checked_add(minute.checked_mul(60)?)?
+        .checked_add(second)
+}
+
+fn days_from_civil(year: i64, month: u32, day: u32) -> Option<i64> {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let month = i64::from(month);
+    let day = i64::from(day);
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
 }
 
 fn token_session_id(token: &str) -> String {
@@ -1538,6 +1631,38 @@ mod tests {
 
         let _ = fs::remove_file(db_path);
         let _ = fs::remove_file(rollout_path);
+        let _ = fs::remove_dir_all(adapter.backup_dir());
+    }
+
+    #[test]
+    fn recycle_bin_entry_reads_project_and_last_active_from_thread_backup() {
+        let db_path = unique_temp_path("recycle-project");
+        let backup_dir = db_path.with_extension("undo");
+        let db = Connection::open(&db_path).unwrap();
+        db.execute_batch(
+            r#"
+            CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, cwd TEXT, rollout_path TEXT, updated_at_ms INTEGER, created_at_ms INTEGER);
+            INSERT INTO threads VALUES ('t1', 'Thread', '/Users/huanglin/code/github/CodexPilot', '/tmp/rollout.jsonl', 1770000000000, 1760000000000);
+            "#,
+        )
+        .unwrap();
+        drop(db);
+
+        let adapter = SQLiteStorageAdapter::with_backup_dir(db_path.clone(), backup_dir);
+        let result = adapter
+            .delete_local(&SessionRef::new("t1", Some("Thread".to_string())))
+            .unwrap();
+        let token = result.undo_token.clone().unwrap();
+
+        let backups = adapter.list_undo_backups().unwrap();
+        let entry = backups.iter().find(|entry| entry.token == token).unwrap();
+        assert_eq!(
+            entry.project_cwd.as_deref(),
+            Some("/Users/huanglin/code/github/CodexPilot")
+        );
+        assert_eq!(entry.last_active_at, Some(1_770_000_000));
+
+        let _ = fs::remove_file(db_path);
         let _ = fs::remove_dir_all(adapter.backup_dir());
     }
 }

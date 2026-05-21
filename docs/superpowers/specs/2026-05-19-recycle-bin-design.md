@@ -33,15 +33,18 @@ RecycleBinEntry
 - token: string
 - session_id: string
 - title: string | null
+- project_cwd: string | null
 - schema: string
 - db_path: PathBuf
 - backup_path: PathBuf
 - deleted_at: number | null
+- last_active_at: number | null
 - recoverable: boolean
 - status: string
 ```
 
 `token` 来自备份文件名。`deleted_at` 优先使用备份文件修改时间。`title` 只从备份里的 `threads.title` 或 `sessions.title` 读取，不读取消息正文。取不到标题时 UI 显示“未命名会话”或短会话 ID。
+`project_cwd` 从 `threads.cwd` 读取；`last_active_at` 优先从 `updated_at_ms`、`updated_at`、`created_at_ms` 推导。取不到时 UI 显示 `-`。
 
 ## 后端设计
 
@@ -72,7 +75,11 @@ Manager 左侧导航使用后续布局设计中的“对话维护”。该页面
 
 - 顶部摘要：已删除记录数量、选中数量。
 - 操作按钮：`刷新`、`恢复可恢复项`、`永久删除`。
-- 表格列：选择框、标题、会话 ID、来源、删除时间、状态。
+- 表格列：选择框、标题、来源、最后活跃、删除时间、状态。
+- 回收站表格主体设置最大高度并内部滚动，表头固定，避免记录过多时把下方“对话归属同步”区域挤出视口。
+- 表格行保持单行紧凑高度；标题、来源、时间、状态列使用固定宽度和省略号，鼠标悬浮显示完整信息。
+- 来源列显示项目目录名，完整 `cwd` 放在悬浮信息中；不再把 `codex_threads` 这类 schema 技术名作为来源主文案。
+- 会话 ID 和备份路径不作为主列展示，只保留在悬浮信息中用于排查。
 - 空状态：`暂无已删除会话`。
 - 错误状态：显示中文错误，不暴露敏感路径以外的内容。
 

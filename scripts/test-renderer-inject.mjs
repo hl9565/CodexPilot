@@ -322,6 +322,16 @@ function createFixture({ includeOther = true, messages } = {}) {
             }
           });
         }
+        if (path === "/session/export-html") {
+          return Promise.resolve({
+            status: "ok",
+            result: {
+              status: "exported",
+              filename: "测试对话.html",
+              html: "<!doctype html><title>测试对话</title>"
+            }
+          });
+        }
         if (path === "/session/delete") {
           return Promise.resolve({
             status: "ok",
@@ -387,7 +397,7 @@ async function flushAsyncWork() {
   const root = document.getElementById("codex-pilot-root");
   assert.ok(root, "应创建 CodexPilot 浮动菜单");
   assert.equal(root.dataset.status, "connected");
-  assert.match(root.textContent, /Pilot|导出 Markdown/);
+  assert.match(root.textContent, /Pilot|导出 MD|导出 HTML/);
   assert.doesNotMatch(root.textContent, /后端状态|检查/);
   assert.match(root.textContent, /CodexPilot|dev/);
   assert.doesNotMatch(root.textContent, /助手/);
@@ -399,7 +409,10 @@ async function flushAsyncWork() {
   assert.ok(bridgeCalls.some((call) => call.path === "/diagnostics/report" && call.payload?.event === "scroll_restore_ready"));
 
   const buttons = root.querySelectorAll("button");
-  const floatingExportButton = buttons[0];
+  const floatingExportButton = buttons.find((button) => button.getAttribute("aria-label") === "导出 Markdown");
+  const floatingHtmlButton = buttons.find((button) => button.getAttribute("aria-label") === "导出 HTML");
+  assert.ok(floatingExportButton, "浮窗应显示 Markdown 导出入口");
+  assert.ok(floatingHtmlButton, "浮窗应显示 HTML 导出入口");
   const message = root.querySelector(".codex-pilot-message");
   assert.match(message.textContent, /后端已连接/);
 
@@ -414,6 +427,18 @@ async function flushAsyncWork() {
     }
   }));
   assert.equal(message.textContent, "已导出：测试对话.md");
+
+  await floatingHtmlButton.click();
+  const htmlExportCall = bridgeCalls.find((call) => call.path === "/session/export-html");
+  assert.equal(JSON.stringify(htmlExportCall), JSON.stringify({
+    path: "/session/export-html",
+    payload: {
+      id: "thread-selected-12345",
+      session_id: "thread-selected-12345",
+      title: "测试对话"
+    }
+  }));
+  assert.equal(message.textContent, "已导出：测试对话.html");
 
   const rowDeleteButton = selected.row.querySelectorAll("button")
     .find((button) => button.getAttribute("aria-label") === "删除会话");

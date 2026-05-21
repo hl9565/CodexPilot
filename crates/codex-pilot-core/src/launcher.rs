@@ -70,6 +70,13 @@ pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Codex App directory not found"))?;
     let debug_port = crate::ports::select_platform_loopback_port(options.debug_port);
     if helper_status(options.helper_port).await.is_ok() {
+        let _ = crate::diagnostic_log::append(
+            "launcher.helper_already_running_skip_inject",
+            serde_json::json!({
+                "debug_port": debug_port,
+                "helper_port": options.helper_port
+            }),
+        );
         crate::status::write_status(&crate::status::BackendStatus {
             status: "running".to_string(),
             version: crate::version::VERSION.to_string(),

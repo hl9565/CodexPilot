@@ -11,8 +11,14 @@
 }
 
 body {
+  height: 100vh;
   margin: 0;
-  overflow-x: hidden;
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
 }
 
 body.uiPreviewMode {
@@ -64,8 +70,8 @@ input[type="checkbox"] {
 .shell {
   display: grid;
   grid-template-columns: 212px 1fr;
-  min-height: 100vh;
-  overflow-x: hidden;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .previewStage {
@@ -93,6 +99,8 @@ input[type="checkbox"] {
 .sidebar {
   background: #ffffff;
   border-right: 1px solid #d7dde5;
+  height: 100vh;
+  overflow: auto;
   padding: 18px 12px;
 }
 
@@ -145,8 +153,9 @@ input[type="checkbox"] {
 }
 
 .content {
+  height: 100vh;
   min-width: 0;
-  overflow-x: hidden;
+  overflow: auto;
   padding: 24px;
 }
 
@@ -401,6 +410,13 @@ h2 {
 .formStack label span {
   color: #6a7889;
   font-size: 12px;
+}
+
+.fieldHint {
+  color: #7a8798;
+  display: block;
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .formStack .checkboxRow {
@@ -688,34 +704,6 @@ h2 {
 .syncControls label span {
   color: #6a7889;
   font-size: 12px;
-}
-
-.labelWithHelp {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-}
-
-.helpDot {
-  align-items: center;
-  background: #eef4ff;
-  border: 1px solid #cad8ff;
-  border-radius: 999px;
-  color: #2459c5;
-  cursor: help;
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 700;
-  height: 18px;
-  justify-content: center;
-  min-height: 18px;
-  padding: 0;
-  width: 18px;
-}
-
-.helpDot:hover {
-  background: #dfe9ff;
-  border-color: #9db7ff;
 }
 
 .syncSummaryGrid {
@@ -1053,21 +1041,24 @@ dd {
 .tableWrap {
   border: 1px solid #e2e7ee;
   border-radius: 7px;
+  max-height: 360px;
   overflow: auto;
 }
 
 .dataTable {
   border-collapse: collapse;
-  min-width: 780px;
+  table-layout: fixed;
   width: 100%;
 }
 
 .dataTable th,
 .dataTable td {
   border-bottom: 1px solid #e2e7ee;
-  padding: 10px;
+  height: 40px;
+  max-width: 0;
+  padding: 6px 10px;
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .dataTable th {
@@ -1075,13 +1066,16 @@ dd {
   color: #5e6d7e;
   font-size: 12px;
   font-weight: 700;
+  position: sticky;
+  top: 0;
   white-space: nowrap;
+  z-index: 1;
 }
 
 .dataTable td {
   color: #243244;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.25;
 }
 
 .dataTable tr:last-child td {
@@ -1090,23 +1084,41 @@ dd {
 
 .dataTable td:first-child,
 .dataTable th:first-child {
-  width: 38px;
+  width: 40px;
 }
 
-.dataTable strong {
+.dataTable th:nth-child(2) {
+  width: 42%;
+}
+
+.dataTable th:nth-child(3) {
+  width: 18%;
+}
+
+.dataTable th:nth-child(4),
+.dataTable th:nth-child(5) {
+  width: 13%;
+}
+
+.dataTable th:nth-child(6) {
+  width: 90px;
+}
+
+.cellText {
+  color: #243244;
   display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cellText.strong {
   font-size: 13px;
-  margin-bottom: 3px;
-  overflow-wrap: anywhere;
+  font-weight: 750;
 }
 
-.dataTable span {
-  color: #637183;
-  display: block;
-  overflow-wrap: anywhere;
-}
-
-.dataTable code {
+.cellText.mono {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
@@ -1290,7 +1302,12 @@ dd {
   font-weight: 700;
   justify-content: center;
   min-height: 24px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 8px;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .pill.ok {

@@ -273,6 +273,14 @@ async fn launch_codex(state: tauri::State<'_, ManagerState>) -> Result<String, S
     let prefs = load_launch_preferences();
     let options = launch_options_from_preferences(&prefs);
     if codex_pilot_core::ports::can_connect_loopback_port(options.helper_port) {
+        append_diagnostic_event(
+            "manager.launch_helper_already_running",
+            serde_json::json!({
+                "debug_port": options.debug_port,
+                "helper_port": options.helper_port,
+                "debug_port_connectable": codex_pilot_core::ports::can_connect_loopback_port(options.debug_port)
+            }),
+        )?;
         let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
         *current = LaunchState::Running;
         return Ok("CodexPilot 已在运行中。".to_string());

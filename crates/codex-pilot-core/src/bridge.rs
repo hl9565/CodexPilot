@@ -296,6 +296,11 @@ where
             return Ok(());
         };
 
+        let execution_context_id = message
+            .get("params")
+            .and_then(|params| params.get("executionContextId"))
+            .and_then(Value::as_u64);
+
         let Some(payload_text) = message
             .get("params")
             .and_then(|params| params.get("payload"))
@@ -327,10 +332,34 @@ where
             .unwrap_or_default()
             .to_string();
         let payload = parsed.get("payload").cloned().unwrap_or_else(|| json!({}));
+        let _ = crate::diagnostic_log::append(
+            "bridge.binding_called",
+            json!({
+                "request_id": request_id,
+                "path": path,
+                "execution_context_id": execution_context_id
+            }),
+        );
 
         match handler(path, payload).await {
-            Ok(result) => self.resolve_bridge_request(request_id, &result).await?,
+            Ok(result) => {
+                let _ = crate::diagnostic_log::append(
+                    "bridge.route_result",
+                    json!({
+                        "request_id": request_id,
+                        "status": result.get("status").and_then(Value::as_str).unwrap_or("unknown")
+                    }),
+                );
+                self.resolve_bridge_request(request_id, &result).await?
+            }
             Err(error) => {
+                let _ = crate::diagnostic_log::append(
+                    "bridge.route_error",
+                    json!({
+                        "request_id": request_id,
+                        "message": error.to_string()
+                    }),
+                );
                 self.reject_bridge_request(request_id, &error.to_string())
                     .await?
             }
@@ -344,13 +373,37 @@ where
         request_id: &str,
         result: &Value,
     ) -> anyhow::Result<()> {
+        let _ = crate::diagnostic_log::append(
+            "bridge.resolve_start",
+            json!({ "request_id": request_id }),
+        );
         let expression = resolve_bridge_expression(request_id, result)?;
-        self.send_command_without_wait(
-            next_message_id(),
-            "Runtime.evaluate",
-            runtime_evaluate_params(&expression),
-        )
-        .await
+        match self
+            .send_command_without_wait(
+                next_message_id(),
+                "Runtime.evaluate",
+                runtime_evaluate_params(&expression),
+            )
+            .await
+        {
+            Ok(()) => {
+                let _ = crate::diagnostic_log::append(
+                    "bridge.resolve_sent",
+                    json!({ "request_id": request_id }),
+                );
+                Ok(())
+            }
+            Err(error) => {
+                let _ = crate::diagnostic_log::append(
+                    "bridge.resolve_failed",
+                    json!({
+                        "request_id": request_id,
+                        "message": error.to_string()
+                    }),
+                );
+                Err(error)
+            }
+        }
     }
 
     async fn reject_bridge_request(
@@ -358,13 +411,40 @@ where
         request_id: &str,
         message: &str,
     ) -> anyhow::Result<()> {
+        let _ = crate::diagnostic_log::append(
+            "bridge.reject_start",
+            json!({
+                "request_id": request_id,
+                "message": message
+            }),
+        );
         let expression = reject_bridge_expression(request_id, message)?;
-        self.send_command_without_wait(
-            next_message_id(),
-            "Runtime.evaluate",
-            runtime_evaluate_params(&expression),
-        )
-        .await
+        match self
+            .send_command_without_wait(
+                next_message_id(),
+                "Runtime.evaluate",
+                runtime_evaluate_params(&expression),
+            )
+            .await
+        {
+            Ok(()) => {
+                let _ = crate::diagnostic_log::append(
+                    "bridge.reject_sent",
+                    json!({ "request_id": request_id }),
+                );
+                Ok(())
+            }
+            Err(error) => {
+                let _ = crate::diagnostic_log::append(
+                    "bridge.reject_failed",
+                    json!({
+                        "request_id": request_id,
+                        "message": error.to_string()
+                    }),
+                );
+                Err(error)
+            }
+        }
     }
 }
 

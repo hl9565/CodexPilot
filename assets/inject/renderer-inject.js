@@ -53,6 +53,9 @@
     exportMarkdown(session) {
       return this.bridge("/session/export-markdown", session);
     },
+    exportHtml(session) {
+      return this.bridge("/session/export-html", session);
+    },
     deleteSession(session) {
       return this.bridge("/session/delete", session);
     },
@@ -149,7 +152,7 @@
         bottom: 48px;
         box-shadow: 0 18px 42px rgba(15, 23, 42, 0.22);
         display: none;
-        min-width: 238px;
+        min-width: 260px;
         padding: 10px;
         position: absolute;
         right: 0;
@@ -198,6 +201,70 @@
       #${rootId} .codex-pilot-action:hover {
         background: #eef4ff;
         border-color: #c8d8fb;
+      }
+
+      #${rootId} .codex-pilot-export-shell {
+        background: #eef2f7;
+        border: 1px solid #d6dee8;
+        border-radius: 10px;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+        padding: 4px;
+      }
+
+      #${rootId} .codex-pilot-export-split {
+        background: #ffffff;
+        border: 1px solid #cfd8e3;
+        border-radius: 7px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        overflow: hidden;
+        padding: 2px;
+      }
+
+      #${rootId} .codex-pilot-export-option {
+        align-items: center;
+        background: #ffffff;
+        border: 0;
+        border-radius: 5px;
+        color: #233044;
+        cursor: pointer;
+        display: flex;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        gap: 6px;
+        justify-content: center;
+        min-height: 32px;
+        min-width: 0;
+        padding: 0 8px;
+        white-space: nowrap;
+      }
+
+      #${rootId} .codex-pilot-export-option + .codex-pilot-export-option {
+        border-left: 1px solid #e0e6ef;
+      }
+
+      #${rootId} .codex-pilot-export-option:hover {
+        background: #f8fbff;
+        color: #1f3654;
+      }
+
+      #${rootId} .codex-pilot-export-option:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      #${rootId} .codex-pilot-export-option svg {
+        flex: 0 0 auto;
+        display: block;
+        height: 14px;
+        width: 14px;
+      }
+
+      #${rootId} .codex-pilot-export-option span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       #${rootId} .codex-pilot-action[data-danger="true"] {
@@ -643,6 +710,20 @@
     return true;
   }
 
+  function downloadHtml(result, fallbackSessionId) {
+    if (!result?.html) return false;
+    const blob = new Blob([result.html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = result.filename || `${fallbackSessionId}.html`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  }
+
   async function exportSession(session, notify = showToast) {
     const response = await window.__CODEX_PILOT__.exportMarkdown(sessionPayload(session));
     const result = response.result || response;
@@ -652,6 +733,18 @@
     }
     downloadMarkdown(result, session.session_id);
     notify(result.filename ? `已导出：${result.filename}` : "已导出 Markdown", null);
+    return true;
+  }
+
+  async function exportSessionHtml(session, notify = showToast) {
+    const response = await window.__CODEX_PILOT__.exportHtml(sessionPayload(session));
+    const result = response.result || response;
+    if (response.status !== "ok" || result.status === "failed" || result.status === "not_found") {
+      notify(result.message || response.message || "导出失败", null);
+      return false;
+    }
+    downloadHtml(result, session.session_id);
+    notify(result.filename ? `已导出：${result.filename}` : "已导出 HTML", null);
     return true;
   }
 
@@ -1224,10 +1317,18 @@
     return Promise.race([
       request,
       new Promise((resolve) => {
-        window.setTimeout(() => resolve({
-          status: "timeout",
-          message: "后端检查超时"
-        }), 2000);
+        window.setTimeout(() => {
+          reportRendererEvent("backend_status_timeout", {
+            helper_port: window.__CODEX_PILOT__?.helperPort,
+            has_bridge: typeof window.__codexPilotBridge === "function",
+            href: String(window.location.href || ""),
+            title: document.title || ""
+          });
+          resolve({
+            status: "timeout",
+            message: "后端检查超时"
+          });
+        }, 2000);
       })
     ]);
   }
@@ -1288,16 +1389,41 @@
       : "dev";
     title.innerHTML = `<strong>CodexPilot</strong><span class="codex-pilot-version">${versionLabel}</span>`;
 
-    const exportButton = document.createElement("button");
-    exportButton.className = "codex-pilot-action";
-    exportButton.type = "button";
-    exportButton.innerHTML = "<span>导出 Markdown</span><span>导出</span>";
+    const exportShell = document.createElement("div");
+    exportShell.className = "codex-pilot-export-shell";
+    const exportSplit = document.createElement("div");
+    exportSplit.className = "codex-pilot-export-split";
+    exportSplit.setAttribute("aria-label", "导出格式");
+    const exportMarkdownButton = document.createElement("button");
+    exportMarkdownButton.className = "codex-pilot-export-option";
+    exportMarkdownButton.type = "button";
+    setIconButtonContent(
+      exportMarkdownButton,
+      "导出 Markdown",
+      '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>'
+    );
+    const exportMarkdownLabel = document.createElement("span");
+    exportMarkdownLabel.textContent = "导出 MD";
+    exportMarkdownButton.append(exportMarkdownLabel);
+    const exportHtmlButton = document.createElement("button");
+    exportHtmlButton.className = "codex-pilot-export-option";
+    exportHtmlButton.type = "button";
+    setIconButtonContent(
+      exportHtmlButton,
+      "导出 HTML",
+      '<path d="M3 5h18"></path><path d="M3 19h18"></path><path d="m9 9-3 3 3 3"></path><path d="m15 9 3 3-3 3"></path>'
+    );
+    const exportHtmlLabel = document.createElement("span");
+    exportHtmlLabel.textContent = "导出 HTML";
+    exportHtmlButton.append(exportHtmlLabel);
+    exportSplit.append(exportMarkdownButton, exportHtmlButton);
+    exportShell.append(exportSplit);
 
     const message = document.createElement("div");
     message.className = "codex-pilot-message";
     message.textContent = "正在检查后端...";
 
-    exportButton.addEventListener("click", async () => {
+    exportMarkdownButton.addEventListener("click", async () => {
       const session = window.__CODEX_PILOT__.detectSession();
       if (!session?.session_id) {
         message.textContent = "未识别到会话，请先在左侧选择一个对话";
@@ -1317,6 +1443,26 @@
       }
     });
 
+    exportHtmlButton.addEventListener("click", async () => {
+      const session = window.__CODEX_PILOT__.detectSession();
+      if (!session?.session_id) {
+        message.textContent = "未识别到会话，请先在左侧选择一个对话";
+        return;
+      }
+      message.textContent = "正在导出 HTML...";
+      try {
+        await exportSessionHtml(session, (text) => {
+          message.textContent = text;
+        });
+      } catch (error) {
+        message.textContent = String(error);
+        reportRendererEvent("export_html_error", {
+          message: String(error),
+          session_id: session.session_id
+        });
+      }
+    });
+
     const toggle = document.createElement("button");
     toggle.className = "codex-pilot-button";
     toggle.type = "button";
@@ -1330,7 +1476,7 @@
       root.dataset.open = root.dataset.open === "true" ? "false" : "true";
     });
 
-    panel.append(title, exportButton, message);
+    panel.append(title, exportShell, message);
     root.append(panel, toggle);
     document.body.appendChild(root);
     scheduleBackendStatusHeartbeat(root, message);
