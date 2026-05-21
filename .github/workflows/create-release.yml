@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      draft:
+        description: "Create as a draft so release notes can be edited before publishing"
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -31,20 +36,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ inputs.tag }}
           PRERELEASE: ${{ inputs.prerelease }}
+          DRAFT: ${{ inputs.draft }}
         run: |
           prerelease_args=()
           if [ "$PRERELEASE" = "true" ]; then
             prerelease_args+=(--prerelease)
+          fi
+          draft_args=()
+          if [ "$DRAFT" = "true" ]; then
+            draft_args+=(--draft)
           fi
 
           if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
             gh release create "$TAG_NAME" \
               --verify-tag \
               --generate-notes \
+              "${draft_args[@]}" \
               "${prerelease_args[@]}"
           else
             gh release create "$TAG_NAME" \
               --target "$GITHUB_SHA" \
               --generate-notes \
+              "${draft_args[@]}" \
               "${prerelease_args[@]}"
           fi

@@ -8,6 +8,8 @@ CodexPilot should be able to publish GitHub Releases whose notes include merged 
 
 Use GitHub's built-in release notes generator instead of maintaining a custom changelog script. A new manual workflow creates a release from a supplied tag and passes `--generate-notes` to the GitHub CLI. This keeps the release body aligned with GitHub's own compare data and pull request metadata.
 
+Generated notes are only the changelog base. CodexPilot releases should still include a short user-facing summary, with Chinese first and English after it when practical. The workflow therefore creates draft releases by default so maintainers can edit the generated body before publishing.
+
 The existing `release-assets.yml` workflow remains responsible for packaging and uploading installer artifacts after a release is published. The new workflow only creates the release and does not build assets.
 
 ## Release Flow
@@ -16,8 +18,9 @@ The existing `release-assets.yml` workflow remains responsible for packaging and
 2. Enter a tag such as `v1.0.5`.
 3. If the tag already exists, the workflow verifies and releases that tag.
 4. If the tag does not exist, GitHub creates the tag at the workflow commit.
-5. GitHub generates release notes from merged pull requests and the previous release tag.
-6. The existing release asset workflow runs after the release is published.
+5. GitHub creates a draft release by default and generates release notes from merged pull requests and the previous release tag.
+6. The maintainer edits the draft body to add a user-facing feature/fix summary before publishing.
+7. The existing release asset workflow runs after the release is published.
 
 ## Notes Content
 
@@ -30,6 +33,20 @@ Release notes are grouped with `.github/release.yml`:
 - Other Changes: everything else
 
 Pull requests can close issues by using GitHub keywords such as `Fixes #123` or `Closes #123`. GitHub then shows the pull request in the release notes, and the linked issue remains traceable from the pull request.
+
+The final release body should use this shape:
+
+```text
+## 更新内容
+
+- User-facing changes in Chinese.
+
+---
+
+## What's Changed
+
+- Generated pull request and changelog content.
+```
 
 ## Error Handling
 
