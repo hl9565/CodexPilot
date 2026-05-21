@@ -420,7 +420,10 @@ mod tests {
 
         let entry = &result["result"][0];
         assert_eq!(entry["sessionId"], "s1");
-        assert_eq!(entry["projectCwd"], "/Users/huanglin/code/github/CodexPilot");
+        assert_eq!(
+            entry["projectCwd"],
+            "/Users/huanglin/code/github/CodexPilot"
+        );
         assert_eq!(entry["lastActiveAt"], 1770000000u64);
         assert!(entry.get("session_id").is_none());
         assert!(entry.get("deletedAt").is_some());

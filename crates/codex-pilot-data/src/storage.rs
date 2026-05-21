@@ -161,6 +161,7 @@ impl SQLiteStorageAdapter {
         let mut db = Connection::open(&self.db_path)?;
         restore_tables(&mut db, &payload.tables)?;
         restore_files(&payload.tables)?;
+        restore_session_index_entries(&payload.tables)?;
         fs::remove_file(&backup_path)
             .with_context(|| format!("delete restored undo backup {}", backup_path.display()))?;
         Ok(DeleteResult {
@@ -488,6 +489,13 @@ impl SQLiteStorageAdapter {
         if !file_backups.is_empty() {
             tables.insert("__files".to_string(), Value::Array(file_backups.clone()));
         }
+        let session_index_backups = session_index_backups(&self.db_path, &thread_id);
+        if !session_index_backups.is_empty() {
+            tables.insert(
+                "__session_index".to_string(),
+                Value::Array(session_index_backups.clone()),
+            );
+        }
 
         let token = self.write_backup(&thread_id, "codex_threads", tables)?;
         let backup_path = self.backup_path(&token)?;
@@ -520,6 +528,18 @@ impl SQLiteStorageAdapter {
                 format!(
                     "本地数据库已删除，但 rollout 文件删除失败：{}",
                     file_errors.join("; ")
+                ),
+                Some(backup_path),
+                Some(token),
+            ));
+        }
+        let index_errors = remove_session_index_entries(&session_index_backups, &thread_id);
+        if !index_errors.is_empty() {
+            return Ok(failed_with_backup(
+                &thread_id,
+                format!(
+                    "本地数据库已删除，但 Codex 会话索引更新失败：{}",
+                    index_errors.join("; ")
                 ),
                 Some(backup_path),
                 Some(token),
@@ -920,6 +940,132 @@ fn restore_files(tables: &Map<String, Value>) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn session_index_backups(db_path: &Path, thread_id: &str) -> Vec<Value> {
+    let Some(index_path) = session_index_path(db_path) else {
+        return Vec::new();
+    };
+    let Ok(text) = fs::read_to_string(&index_path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter(|line| session_index_line_id(line).as_deref() == Some(thread_id))
+        .map(|line| {
+            json!({
+                "path": index_path,
+                "line": line,
+            })
+        })
+        .collect()
+}
+
+fn remove_session_index_entries(entries: &[Value], thread_id: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    let paths = entries
+        .iter()
+        .filter_map(|entry| entry.get("path").and_then(Value::as_str))
+        .collect::<HashSet<_>>();
+    for path in paths {
+        let path = Path::new(path);
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                errors.push(format!("{}: {error}", path.display()));
+                continue;
+            }
+        };
+        let mut changed = false;
+        let kept = text
+            .lines()
+            .filter(|line| {
+                let should_remove = session_index_line_id(line).as_deref() == Some(thread_id);
+                changed |= should_remove;
+                !should_remove
+            })
+            .collect::<Vec<_>>();
+        if changed {
+            let next = if kept.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", kept.join("\n"))
+            };
+            if let Err(error) = fs::write(path, next) {
+                errors.push(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+    errors
+}
+
+fn restore_session_index_entries(tables: &Map<String, Value>) -> anyhow::Result<()> {
+    let Some(entries) = tables.get("__session_index").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let mut by_path = HashSet::new();
+    for path in entries
+        .iter()
+        .filter_map(|entry| entry.get("path").and_then(Value::as_str))
+    {
+        by_path.insert(path.to_string());
+    }
+    for path in by_path {
+        let path = PathBuf::from(path);
+        let existing = fs::read_to_string(&path).unwrap_or_default();
+        let restore_lines = entries
+            .iter()
+            .filter(|entry| {
+                entry.get("path").and_then(Value::as_str) == Some(path.to_string_lossy().as_ref())
+            })
+            .filter_map(|entry| entry.get("line").and_then(Value::as_str))
+            .filter(|line| !line.trim().is_empty())
+            .collect::<Vec<_>>();
+        if restore_lines.is_empty() {
+            continue;
+        }
+        let restore_ids = restore_lines
+            .iter()
+            .filter_map(|line| session_index_line_id(line))
+            .collect::<HashSet<_>>();
+        let mut lines = existing
+            .lines()
+            .filter(|line| {
+                session_index_line_id(line)
+                    .map(|id| !restore_ids.contains(&id))
+                    .unwrap_or(true)
+            })
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        lines.extend(restore_lines.into_iter().map(ToString::to_string));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(
+            &path,
+            if lines.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", lines.join("\n"))
+            },
+        )?;
+    }
+    Ok(())
+}
+
+fn session_index_path(db_path: &Path) -> Option<PathBuf> {
+    if db_path.file_name().and_then(|name| name.to_str()) != Some("state_5.sqlite") {
+        return None;
+    }
+    Some(db_path.parent()?.join("session_index.jsonl"))
+}
+
+fn session_index_line_id(line: &str) -> Option<String> {
+    serde_json::from_str::<Value>(line)
+        .ok()?
+        .get("id")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
 fn update_rollout_session_meta_cwd(
     rollout_path: &str,
     thread_id: &str,
@@ -1045,7 +1191,10 @@ fn backup_last_active_at(tables: &Map<String, Value>) -> Option<u64> {
         .find_map(|column| timestamp_seconds(row.get(*column)?))
 }
 
-fn backup_first_row<'a>(tables: &'a Map<String, Value>, table: &str) -> Option<&'a Map<String, Value>> {
+fn backup_first_row<'a>(
+    tables: &'a Map<String, Value>,
+    table: &str,
+) -> Option<&'a Map<String, Value>> {
     tables
         .get(table)
         .and_then(Value::as_array)
@@ -1055,15 +1204,23 @@ fn backup_first_row<'a>(tables: &'a Map<String, Value>, table: &str) -> Option<&
 
 fn timestamp_seconds(value: &Value) -> Option<u64> {
     match value {
-        Value::Number(number) => number
-            .as_u64()
-            .map(|value| if value > 10_000_000_000 { value / 1000 } else { value }),
+        Value::Number(number) => number.as_u64().map(|value| {
+            if value > 10_000_000_000 {
+                value / 1000
+            } else {
+                value
+            }
+        }),
         Value::String(value) => {
             let trimmed = value.trim();
             if trimmed.is_empty() {
                 None
             } else if let Ok(number) = trimmed.parse::<u64>() {
-                Some(if number > 10_000_000_000 { number / 1000 } else { number })
+                Some(if number > 10_000_000_000 {
+                    number / 1000
+                } else {
+                    number
+                })
             } else {
                 parse_rfc3339_seconds(trimmed)
             }
@@ -1090,7 +1247,9 @@ fn parse_rfc3339_seconds(value: &str) -> Option<u64> {
         .parse::<u64>()
         .ok()?;
     let days = days_from_civil(year, month, day)?;
-    u64::try_from(days).ok()?.checked_mul(86_400)?
+    u64::try_from(days)
+        .ok()?
+        .checked_mul(86_400)?
         .checked_add(hour.checked_mul(3_600)?)?
         .checked_add(minute.checked_mul(60)?)?
         .checked_add(second)
@@ -1543,6 +1702,67 @@ mod tests {
         let _ = fs::remove_file(db_path);
         let _ = fs::remove_file(rollout_path);
         let _ = fs::remove_dir_all(adapter.backup_dir());
+    }
+
+    #[test]
+    fn deletes_and_restores_codex_session_index_entry() {
+        let root = std::env::temp_dir().join(format!(
+            "codex-pilot-data-session-index-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let db_path = root.join("state_5.sqlite");
+        let backup_dir = root.join(".codex-pilot-undo");
+        let rollout_path = root.join("rollout-t1.jsonl");
+        let session_index_path = root.join("session_index.jsonl");
+        fs::write(&rollout_path, "rollout data").unwrap();
+        fs::write(
+            &session_index_path,
+            "{\"id\":\"other\",\"thread_name\":\"Other\",\"updated_at\":\"2026-05-21T00:00:00Z\"}\n{\"id\":\"t1\",\"thread_name\":\"Thread\",\"updated_at\":\"2026-05-21T01:00:00Z\"}\n",
+        )
+        .unwrap();
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, rollout_path TEXT)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO threads VALUES (?1, ?2, ?3)",
+            ("t1", "Thread", rollout_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        drop(db);
+
+        let adapter = SQLiteStorageAdapter::with_backup_dir(db_path.clone(), backup_dir);
+        let result = adapter.delete_local(&SessionRef::new("t1", None)).unwrap();
+        assert_eq!(result.status, DeleteStatus::Deleted);
+        let token = result.undo_token.clone().unwrap();
+        let session_index = fs::read_to_string(&session_index_path).unwrap();
+        assert!(session_index.contains("\"id\":\"other\""));
+        assert!(!session_index.contains("\"id\":\"t1\""));
+
+        fs::write(
+            &session_index_path,
+            format!(
+                "{}{}",
+                fs::read_to_string(&session_index_path).unwrap(),
+                "{\"id\":\"t1\",\"thread_name\":\"Stale duplicate\",\"updated_at\":\"2026-05-21T02:00:00Z\"}\n"
+            ),
+        )
+        .unwrap();
+        let undo = adapter.undo(&token).unwrap();
+        assert_eq!(undo.status, DeleteStatus::Undone);
+        let session_index = fs::read_to_string(&session_index_path).unwrap();
+        assert!(session_index.contains("\"id\":\"other\""));
+        assert!(session_index.contains("\"thread_name\":\"Thread\""));
+        assert!(!session_index.contains("Stale duplicate"));
+        assert_eq!(session_index.matches("\"id\":\"t1\"").count(), 1);
+
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

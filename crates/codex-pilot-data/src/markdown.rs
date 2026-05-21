@@ -34,7 +34,13 @@ pub struct MarkdownExportService {
 struct Message {
     speaker: String,
     timestamp: Option<String>,
-    body: String,
+    blocks: Vec<MessageBlock>,
+}
+
+#[derive(Debug)]
+enum MessageBlock {
+    Text(String),
+    Image(Option<String>),
 }
 
 impl MarkdownExportService {
@@ -54,7 +60,11 @@ impl MarkdownExportService {
         self.export_with(session, ExportFormat::Html)
     }
 
-    fn export_with(&self, session: &SessionRef, format: ExportFormat) -> anyhow::Result<ExportResult> {
+    fn export_with(
+        &self,
+        session: &SessionRef,
+        format: ExportFormat,
+    ) -> anyhow::Result<ExportResult> {
         if !self.db_path.exists() {
             return Ok(failed(
                 &session.normalized_id(),
@@ -202,13 +212,13 @@ fn fetch_generic_messages(db: &Connection, session_id: &str) -> anyhow::Result<V
             Ok(Message {
                 speaker: display_role(&role),
                 timestamp,
-                body,
+                blocks: text_blocks(body),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(messages
         .into_iter()
-        .filter(|message| !message.body.trim().is_empty())
+        .filter(|message| !message.blocks.is_empty())
         .collect())
 }
 
@@ -230,8 +240,8 @@ fn load_rollout_messages(path: &Path) -> anyhow::Result<Vec<Message>> {
         if !matches!(role, "user" | "assistant" | "system") {
             continue;
         }
-        let body = serialize_message_content(&payload["content"]);
-        if body.trim().is_empty() {
+        let blocks = serialize_message_content(&payload["content"]);
+        if blocks.is_empty() {
             continue;
         }
         messages.push(Message {
@@ -240,32 +250,31 @@ fn load_rollout_messages(path: &Path) -> anyhow::Result<Vec<Message>> {
                 .get("timestamp")
                 .and_then(Value::as_str)
                 .map(ToString::to_string),
-            body,
+            blocks,
         });
     }
     Ok(messages)
 }
 
-fn serialize_message_content(content: &Value) -> String {
+fn serialize_message_content(content: &Value) -> Vec<MessageBlock> {
     let Some(items) = content.as_array() else {
-        return String::new();
+        return Vec::new();
     };
     items
         .iter()
-        .filter_map(|block| {
+        .flat_map(|block| {
             let block_type = block.get("type").and_then(Value::as_str)?;
             match block_type {
                 "input_text" | "output_text" | "text" => block
                     .get("text")
                     .and_then(Value::as_str)
-                    .map(normalize_newlines),
-                "input_image" => Some("> Image attachment".to_string()),
+                    .map(|text| text_blocks(text.to_string())),
+                "input_image" => Some(vec![MessageBlock::Image(extract_image_src(block))]),
                 _ => None,
             }
         })
-        .filter(|block| !block.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
+        .flatten()
+        .collect()
 }
 
 fn render_markdown(title: &str, messages: &[Message]) -> String {
@@ -280,7 +289,7 @@ fn render_markdown(title: &str, messages: &[Message]) -> String {
             lines.push(format!("_{timestamp}_"));
         }
         lines.push(String::new());
-        lines.push(message.body.trim().to_string());
+        lines.push(render_markdown_body(&message.blocks));
         lines.push(String::new());
     }
     format!("{}\n", lines.join("\n").trim_end())
@@ -290,22 +299,27 @@ fn render_html(title: &str, messages: &[Message]) -> String {
     let exported_at = exported_at_label();
     let mut sections = String::new();
     if messages.is_empty() {
-        sections.push_str(
-            r#"<section class="empty">No messages found.</section>"#,
-        );
+        sections.push_str(r#"<section class="empty">No messages found.</section>"#);
     }
     for message in messages {
         let timestamp = message
             .timestamp
             .as_ref()
             .filter(|value| !value.is_empty())
-            .map(|value| format!(r#"<span class="time">{}</span>"#, escape_html(value)))
+            .map(|value| {
+                format!(
+                    r#"<span class="time">{}</span>"#,
+                    escape_html(&display_message_time(value))
+                )
+            })
             .unwrap_or_default();
         sections.push_str(&format!(
-            r#"<section class="message"><aside class="speaker">{speaker}{timestamp}</aside><div class="body">{body}</div></section>"#,
-            speaker = escape_html(&message.speaker),
+            r#"<section class="message {role_class}"><div class="avatar" aria-hidden="true">{avatar}</div><div class="bubble-wrap"><div class="speaker">{speaker}{timestamp}</div><div class="bubble">{body}</div></div></section>"#,
+            role_class = role_class(&message.speaker),
+            avatar = avatar_markup(&message.speaker),
+            speaker = escape_html(&display_speaker_label(&message.speaker)),
             timestamp = timestamp,
-            body = render_html_body(&message.body)
+            body = render_html_body(&message.blocks)
         ));
     }
     format!(
@@ -330,7 +344,7 @@ fn render_html(title: &str, messages: &[Message]) -> String {
       border-radius: 12px;
       box-shadow: 0 18px 48px rgba(15, 23, 42, 0.10);
       margin: 32px auto;
-      max-width: 980px;
+      max-width: 920px;
       overflow: hidden;
     }}
     header {{
@@ -355,35 +369,128 @@ fn render_html(title: &str, messages: &[Message]) -> String {
       font-size: 13px;
       gap: 12px;
     }}
-    main {{ padding: 10px 34px 34px; }}
-    .message {{
-      border-bottom: 1px solid #e8edf4;
-      display: grid;
-      gap: 18px;
-      grid-template-columns: 116px minmax(0, 1fr);
-      padding: 20px 0;
+    main {{
+      background: #f8fafc;
+      padding: 18px 34px 34px;
     }}
-    .message:last-child {{ border-bottom: 0; }}
+    .message {{
+      align-items: flex-start;
+      display: flex;
+      gap: 10px;
+      margin: 18px 0;
+    }}
+    .message.user {{
+      flex-direction: row-reverse;
+    }}
+    .bubble-wrap {{
+      max-width: min(680px, calc(100% - 54px));
+      min-width: 0;
+    }}
     .speaker {{
-      color: #405068;
+      color: #64748b;
       font-size: 12px;
-      font-weight: 800;
-      padding-top: 3px;
+      font-weight: 700;
+      margin: 0 0 6px;
+    }}
+    .user .speaker {{
+      text-align: right;
     }}
     .time {{
-      color: #8995a5;
-      display: block;
-      font-size: 11px;
+      color: #94a3b8;
+      display: inline;
+      font-size: 12px;
       font-weight: 600;
-      margin-top: 5px;
-      overflow-wrap: anywhere;
+      margin-left: 8px;
     }}
-    .body {{
+    .avatar {{
+      align-items: center;
+      background: #e2e8f0;
+      border: 1px solid #cbd5e1;
+      border-radius: 50%;
+      color: #475569;
+      display: flex;
+      flex: 0 0 36px;
+      height: 36px;
+      justify-content: center;
+      margin-top: 24px;
+      width: 36px;
+    }}
+    .user .avatar {{
+      background: #e0f2fe;
+      border-color: #bae6fd;
+      color: #0369a1;
+    }}
+    .assistant .avatar {{
+      background: #eef2ff;
+      border-color: #c7d2fe;
+      color: #4338ca;
+    }}
+    .avatar svg {{
+      height: 19px;
+      width: 19px;
+    }}
+    .bubble {{
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
       color: #1f2937;
       font-size: 14px;
       min-width: 0;
+      overflow: hidden;
+      padding: 14px 16px;
+    }}
+    .user .bubble {{
+      background: #eef8ff;
+      border-color: #cfe8f8;
+    }}
+    .text {{
       overflow-wrap: anywhere;
       white-space: pre-wrap;
+    }}
+    .text + .text,
+    .text + .image-block,
+    .text + .code-block,
+    .image-block + .text,
+    .image-block + .image-block,
+    .image-block + .code-block,
+    .code-block + .text,
+    .code-block + .image-block,
+    .code-block + .code-block {{
+      margin-top: 12px;
+    }}
+    .code-block {{
+      background: #0f172a;
+      border-radius: 8px;
+      color: #e5e7eb;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      margin: 0;
+      overflow-x: auto;
+      padding: 12px 14px;
+      white-space: pre;
+    }}
+    .image-block {{
+      align-items: center;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      color: #64748b;
+      display: inline-flex;
+      font-size: 13px;
+      font-weight: 700;
+      gap: 8px;
+      margin: 0;
+      max-width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+    }}
+    .image-block img {{
+      border-radius: 6px;
+      display: block;
+      max-height: 360px;
+      max-width: 100%;
     }}
     .empty {{
       color: #66758a;
@@ -392,7 +499,7 @@ fn render_html(title: &str, messages: &[Message]) -> String {
     @media (max-width: 720px) {{
       .page {{ border-left: 0; border-right: 0; border-radius: 0; margin: 0; }}
       header, main {{ padding-left: 20px; padding-right: 20px; }}
-      .message {{ grid-template-columns: 1fr; gap: 6px; }}
+      .bubble-wrap {{ max-width: calc(100% - 48px); }}
     }}
   </style>
 </head>
@@ -443,8 +550,7 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i64, u32, u32) {
     let year_of_era =
         (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let mut year = year_of_era + era * 400;
-    let day_of_year = day_of_era
-        - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_index = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_index + 2) / 5 + 1;
     let month = month_index + if month_index < 10 { 3 } else { -9 };
@@ -454,8 +560,203 @@ fn civil_from_days(days_since_unix_epoch: i64) -> (i64, u32, u32) {
     (year, month as u32, day as u32)
 }
 
-fn render_html_body(body: &str) -> String {
-    escape_html(body.trim())
+fn text_blocks(value: String) -> Vec<MessageBlock> {
+    let cleaned = normalize_newlines(&value);
+    if cleaned.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![MessageBlock::Text(cleaned)]
+    }
+}
+
+fn strip_image_tags(value: &str) -> String {
+    let mut output = value.to_string();
+    loop {
+        let Some(start) = output.find("<image>") else {
+            break;
+        };
+        let end = output[start..]
+            .find("</image>")
+            .map(|offset| start + offset + "</image>".len())
+            .unwrap_or(start + "<image>".len());
+        output.replace_range(start..end, "");
+    }
+    output
+}
+
+fn extract_image_src(block: &Value) -> Option<String> {
+    ["image_url", "url", "path", "file_path", "data_url", "image"]
+        .iter()
+        .find_map(|key| block.get(*key).and_then(Value::as_str))
+        .or_else(|| {
+            block
+                .get("source")
+                .and_then(|source| source.get("url").or_else(|| source.get("path")))
+                .and_then(Value::as_str)
+        })
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (trimmed.starts_with("data:image/")
+                || trimmed.starts_with("file://")
+                || trimmed.starts_with('/')
+                || trimmed.starts_with("http://")
+                || trimmed.starts_with("https://"))
+            .then_some(trimmed.to_string())
+        })
+}
+
+fn render_markdown_body(blocks: &[MessageBlock]) -> String {
+    blocks
+        .iter()
+        .map(|block| match block {
+            MessageBlock::Text(text) => text.trim().to_string(),
+            MessageBlock::Image(_) => "> Image attachment".to_string(),
+        })
+        .filter(|block| !block.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn render_html_body(blocks: &[MessageBlock]) -> String {
+    blocks
+        .iter()
+        .map(|block| match block {
+            MessageBlock::Text(text) => render_html_text(text),
+            MessageBlock::Image(src) => render_image_block(src.as_deref()),
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn render_html_text(value: &str) -> String {
+    split_fenced_code(&strip_image_tags(value))
+        .into_iter()
+        .map(|block| match block {
+            TextPart::Plain(text) => {
+                format!(r#"<div class="text">{}</div>"#, escape_html(text.trim()))
+            }
+            TextPart::Code(code) => format!(
+                r#"<pre class="code-block"><code>{}</code></pre>"#,
+                escape_html(code.trim())
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+enum TextPart {
+    Plain(String),
+    Code(String),
+}
+
+fn split_fenced_code(value: &str) -> Vec<TextPart> {
+    let mut parts = Vec::new();
+    let mut plain = Vec::new();
+    let mut code = Vec::new();
+    let mut in_code = false;
+
+    for line in normalize_newlines(value).lines() {
+        if line.trim_start().starts_with("```") {
+            if in_code {
+                parts.push(TextPart::Code(code.join("\n")));
+                code.clear();
+                in_code = false;
+            } else {
+                if !plain.join("\n").trim().is_empty() {
+                    parts.push(TextPart::Plain(plain.join("\n")));
+                }
+                plain.clear();
+                in_code = true;
+            }
+            continue;
+        }
+        if in_code {
+            code.push(line.to_string());
+        } else {
+            plain.push(line.to_string());
+        }
+    }
+
+    if in_code {
+        plain.push("```".to_string());
+        plain.extend(code);
+    }
+    if !plain.join("\n").trim().is_empty() {
+        parts.push(TextPart::Plain(plain.join("\n")));
+    }
+    parts
+}
+
+fn render_image_block(src: Option<&str>) -> String {
+    match src {
+        Some(src) => format!(
+            r#"<figure class="image-block"><img src="{}" alt="Image attachment"></figure>"#,
+            escape_html(src)
+        ),
+        None => format!(
+            r#"<div class="image-block">{icon}<span>图片附件</span></div>"#,
+            icon = image_icon()
+        ),
+    }
+}
+
+fn role_class(speaker: &str) -> &'static str {
+    match speaker {
+        "User" => "user",
+        "Assistant" => "assistant",
+        _ => "system",
+    }
+}
+
+fn display_speaker_label(speaker: &str) -> &str {
+    match speaker {
+        "User" => "You",
+        "Assistant" => "AI",
+        value => value,
+    }
+}
+
+fn avatar_markup(speaker: &str) -> &'static str {
+    match speaker {
+        "Assistant" => robot_icon(),
+        "User" => user_icon(),
+        _ => system_icon(),
+    }
+}
+
+fn robot_icon() -> &'static str {
+    r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4"/><rect x="5" y="8" width="14" height="10" rx="3"/><path d="M8 14h.01"/><path d="M16 14h.01"/><path d="M9 18v2h6v-2"/></svg>"#
+}
+
+fn user_icon() -> &'static str {
+    r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>"#
+}
+
+fn system_icon() -> &'static str {
+    r#"<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/></svg>"#
+}
+
+fn image_icon() -> &'static str {
+    r#"<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="m21 15-5-5L5 19"/></svg>"#
+}
+
+fn display_message_time(value: &str) -> String {
+    parse_time_hhmm(value).unwrap_or_else(|| value.to_string())
+}
+
+fn parse_time_hhmm(value: &str) -> Option<String> {
+    let time_part = value
+        .split('T')
+        .nth(1)
+        .or_else(|| value.split_whitespace().nth(1))?;
+    let mut pieces = time_part.split(':');
+    let hour = pieces.next()?;
+    let minute = pieces.next()?;
+    if hour.len() == 2 && minute.len() == 2 {
+        Some(format!("{hour}:{minute}"))
+    } else {
+        None
+    }
 }
 
 fn escape_html(value: &str) -> String {
@@ -669,7 +970,10 @@ mod tests {
             CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT);
             CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, body TEXT, created_at TEXT);
             INSERT INTO sessions VALUES ('s1', 'Display <Thread>');
-            INSERT INTO messages (session_id, role, body, created_at) VALUES ('s1', 'user', '<script>alert(1)</script>', '2026-01-01T00:00:00Z');
+            INSERT INTO messages (session_id, role, body, created_at) VALUES ('s1', 'user', '<script>alert(1)</script>', '2026-01-01T09:47:03Z');
+            INSERT INTO messages (session_id, role, body, created_at) VALUES ('s1', 'assistant', '```rust
+fn main() {}
+```', '2026-01-01T09:48:03Z');
             "#,
         )
         .unwrap();
@@ -683,10 +987,126 @@ mod tests {
         let html = result.html.unwrap();
         assert!(html.contains("CodexPilot Export"));
         assert!(html.contains("Display &lt;Thread&gt;"));
+        assert!(html.contains(r#"<section class="message user">"#));
+        assert!(html.contains(r#"<section class="message assistant">"#));
+        assert!(html.contains(r#">You<span class="time">09:47</span>"#));
+        assert!(html.contains(r#">AI<span class="time">09:48</span>"#));
+        assert!(html.contains(r#"<pre class="code-block"><code>fn main() {}"#));
+        assert!(!html.contains("```rust"));
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!html.contains("<script>alert(1)</script>"));
 
         let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn exports_rollout_html_with_clean_image_attachment() {
+        let db_path = unique_temp_path("html-image-export", "sqlite");
+        let rollout_path = unique_temp_path("html-image-rollout", "jsonl");
+        fs::write(
+            &rollout_path,
+            r#"{"type":"response_item","timestamp":"2026-05-21T09:47:03.505Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"点了同步没反应\n<image>\n> Image attachment\n</image>"},{"type":"input_image","image_url":"data:image/png;base64,abc"}]}}"#,
+        )
+        .unwrap();
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, rollout_path TEXT)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO threads VALUES (?1, ?2, ?3)",
+            ("t1", "Thread", rollout_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        drop(db);
+
+        let service = MarkdownExportService::new(db_path.clone());
+        let result = service
+            .export_html(&SessionRef::new("local:t1", None))
+            .unwrap();
+        assert_eq!(result.status, ExportStatus::Exported);
+        let html = result.html.unwrap();
+        assert!(html.contains("点了同步没反应"));
+        assert!(html.contains(r#"<span class="time">09:47</span>"#));
+        assert!(html.contains(r#"<img src="data:image/png;base64,abc" alt="Image attachment">"#));
+        assert!(!html.contains("&lt;image&gt;"));
+        assert!(!html.contains("Image attachment</div>"));
+
+        let _ = fs::remove_file(db_path);
+        let _ = fs::remove_file(rollout_path);
+    }
+
+    #[test]
+    fn exports_rollout_html_image_sources_and_placeholder() {
+        let db_path = unique_temp_path("html-image-sources-export", "sqlite");
+        let rollout_path = unique_temp_path("html-image-sources-rollout", "jsonl");
+        fs::write(
+            &rollout_path,
+            r#"{"type":"response_item","timestamp":"2026-05-21T09:47:03.505Z","payload":{"type":"message","role":"user","content":[{"type":"input_image","image_url":" https://example.com/a.png "},{"type":"input_image","path":"/tmp/local-image.png"},{"type":"input_image"}]}}"#,
+        )
+        .unwrap();
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, rollout_path TEXT)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO threads VALUES (?1, ?2, ?3)",
+            ("t1", "Thread", rollout_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        drop(db);
+
+        let service = MarkdownExportService::new(db_path.clone());
+        let result = service
+            .export_html(&SessionRef::new("local:t1", None))
+            .unwrap();
+        assert_eq!(result.status, ExportStatus::Exported);
+        let html = result.html.unwrap();
+        assert!(html.contains(r#"<img src="https://example.com/a.png" alt="Image attachment">"#));
+        assert!(html.contains(r#"<img src="/tmp/local-image.png" alt="Image attachment">"#));
+        assert!(html.contains("<span>图片附件</span>"));
+
+        let _ = fs::remove_file(db_path);
+        let _ = fs::remove_file(rollout_path);
+    }
+
+    #[test]
+    fn markdown_export_keeps_image_wrappers_and_uses_safe_image_placeholder() {
+        let db_path = unique_temp_path("markdown-image-export", "sqlite");
+        let rollout_path = unique_temp_path("markdown-image-rollout", "jsonl");
+        fs::write(
+            &rollout_path,
+            r#"{"type":"response_item","timestamp":"2026-05-21T09:47:03.505Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"keep <image>inside</image>"},{"type":"input_image","image_url":"https://example.com/a).png"}]}}"#,
+        )
+        .unwrap();
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, rollout_path TEXT)",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO threads VALUES (?1, ?2, ?3)",
+            ("t1", "Thread", rollout_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+        drop(db);
+
+        let service = MarkdownExportService::new(db_path.clone());
+        let result = service
+            .export_markdown(&SessionRef::new("local:t1", None))
+            .unwrap();
+        assert_eq!(result.status, ExportStatus::Exported);
+        let markdown = result.markdown.unwrap();
+        assert!(markdown.contains("keep <image>inside</image>"));
+        assert!(markdown.contains("> Image attachment"));
+        assert!(!markdown.contains("https://example.com/a).png"));
+
+        let _ = fs::remove_file(db_path);
+        let _ = fs::remove_file(rollout_path);
     }
 
     #[test]

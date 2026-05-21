@@ -46,6 +46,16 @@ RecycleBinEntry
 `token` 来自备份文件名。`deleted_at` 优先使用备份文件修改时间。`title` 只从备份里的 `threads.title` 或 `sessions.title` 读取，不读取消息正文。取不到标题时 UI 显示“未命名会话”或短会话 ID。
 `project_cwd` 从 `threads.cwd` 读取；`last_active_at` 优先从 `updated_at_ms`、`updated_at`、`created_at_ms` 推导。取不到时 UI 显示 `-`。
 
+undo 备份中允许包含内部辅助段：
+
+```text
+__session_index
+- path: string
+- line: string
+```
+
+该段只用于恢复 Codex 自身的 `session_index.jsonl` 列表索引。`line` 保存匹配被删 thread id 的原始 JSONL 行，不展示给 UI。
+
 ## 后端设计
 
 在 `codex-pilot-data::storage` 增加：
@@ -68,6 +78,10 @@ Manager Tauri command 对应增加：
 - `delete_recycle_bin_entries`
 
 恢复成功后继续执行 provider sync，沿用现有 undo 行为。
+
+删除 Codex thread 时，除了删除 SQLite 行和 rollout 文件，还要同步移除 `~/.codex/session_index.jsonl` 中对应 thread id 的索引行。移除前把原始行写入 undo 备份的 `__session_index`。恢复时，在 SQLite 和 rollout 文件恢复成功后，把备份的索引行写回 `session_index.jsonl`；写回前按 id 去重，避免重复索引。
+
+`session_index.jsonl` 不存在、缺少对应行，或备份里没有 `__session_index` 时，不阻塞删除和恢复。索引同步失败时，删除/恢复返回失败并保留 undo 备份，避免数据库状态和 Codex 列表长期不一致。
 
 ## UI 设计
 
@@ -101,6 +115,7 @@ Manager 左侧导航使用后续布局设计中的“对话维护”。该页面
 ## 测试计划
 
 - `codex-pilot-data` fixture：删除会话后能列出回收站条目。
+- `codex-pilot-data` fixture：删除 Codex thread 会移除 `session_index.jsonl` 中对应索引，undo 会恢复索引。
 - `codex-pilot-data` fixture：损坏备份不会导致整个列表失败。
 - `codex-pilot-data` fixture：永久删除只删除目标备份文件。
 - `codex-pilot-data` fixture：恢复后条目仍可按现有 undo 逻辑恢复数据。

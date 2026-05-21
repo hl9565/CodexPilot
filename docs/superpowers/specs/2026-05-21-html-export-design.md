@@ -45,13 +45,23 @@ The page includes:
 
 - conversation title;
 - export metadata such as generation time and message count;
-- ordered message sections with role, optional timestamp, and body;
-- readable typography, clear separators, and responsive layout;
-- styled code blocks through the existing text content, without adding a
-  Markdown parser dependency in this change.
+- ordered message bubbles with user messages aligned right and AI/system
+  messages aligned left;
+- compact neutral avatars, using a person avatar for the user side and a robot
+  avatar for AI answers;
+- optional timestamps formatted for reading, such as `09:47`, instead of raw
+  ISO strings;
+- readable typography, subtle bubble borders, and responsive layout that stays
+  aligned with CodexPilot's restrained white/gray/blue visual language;
+- styled fenced code blocks without displaying the code language marker as body
+  text;
+- image attachments rendered as images when a data URL, file path, or HTTP URL
+  is available, otherwise as a clean attachment placeholder instead of raw
+  `<image>` or `Image attachment` text.
 
 The renderer must escape HTML-sensitive characters from the conversation content
-before inserting them into the document.
+before inserting them into the document. It should also suppress internal
+attachment wrapper tags that are useful in Markdown but noisy in HTML.
 
 ## Architecture
 
