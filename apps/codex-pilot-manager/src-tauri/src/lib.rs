@@ -455,6 +455,18 @@ fn provider_snapshot() -> ProviderSnapshot {
         .iter()
         .find(|profile| profile.id == profiles.active_profile_id)
         .or_else(|| profiles.profiles.first());
+    let effective_mode = if provider.active {
+        provider.mode.as_str()
+    } else {
+        "official"
+    };
+    let effective_profile_name = if effective_mode == "official" {
+        "官方通道".to_string()
+    } else {
+        active_profile
+            .map(|profile| profile.name.clone())
+            .unwrap_or_else(|| "默认中转".to_string())
+    };
     ProviderSnapshot {
         active_provider: if provider.active {
             provider.provider
@@ -466,9 +478,7 @@ fn provider_snapshot() -> ProviderSnapshot {
         } else {
             "official".to_string()
         },
-        profile: active_profile
-            .map(|profile| profile.name.clone())
-            .unwrap_or_else(|| "默认中转".to_string()),
+        profile: effective_profile_name,
         source: provider.config_path,
         auth_path: codex_pilot_core::app_paths::codex_auth_path()
             .to_string_lossy()

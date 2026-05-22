@@ -365,6 +365,28 @@ API-backed channels (`混合中转` and `无账号`) show:
 - profile names unique after trimming
 ### Save Behavior
 
+### Channel Selection Behavior
+
+Selecting a channel card is an immediate apply action, not a deferred draft.
+
+Rules:
+
+- clicking `官方通道` immediately clears the CodexPilot provider config and
+  refreshes overview/provider snapshots;
+- clicking `混合中转` immediately applies the currently active profile in
+  `hybridApi` mode;
+- clicking `无账号` immediately applies the currently active profile in `api`
+  mode;
+- if the active profile is incomplete or invalid for the requested channel, the
+  channel switch must fail clearly and keep the previous effective channel;
+- the lower `保存` button only saves profile fields such as name, Base URL,
+  API key, and upstream protocol; it must not be the only way to switch
+  channels.
+
+Overview and Provider page summaries must reflect the same effective channel
+state. When the effective channel is `官方通道`, the summary must not continue to
+show an API profile as if it were the active applied route.
+
 #### 官方通道
 
 Saving `官方通道`:

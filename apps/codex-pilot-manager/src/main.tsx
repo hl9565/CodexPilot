@@ -471,15 +471,18 @@ function OverviewView({
           <div className="channelChoiceSummary">
             <div className="segmentedPreview">
               <span className={provider?.mode === "official" ? "active" : ""}>官方通道</span>
-              <span className={provider?.mode !== "official" ? "active" : ""}>混合中转</span>
+              <span className={provider?.mode === "hybridApi" ? "active" : ""}>混合中转</span>
+              <span className={provider?.mode === "api" ? "active" : ""}>无账号</span>
             </div>
             <p className="channelModeCopy">
               {provider?.mode === "official"
                 ? "使用 Codex/ChatGPT 官方登录，不写入自定义模型供应商。"
-                : "保留 Codex/ChatGPT 登录，把模型请求转到当前 API 配置。"}
+                : provider?.mode === "api"
+                  ? "不依赖 Codex/ChatGPT 登录，直接使用当前 API 配置。"
+                  : "保留 Codex/ChatGPT 登录，把模型请求转到当前 API 配置。"}
             </p>
             <p>账号：{provider?.accountLabel ?? "未读取到账号信息"}</p>
-            <p>当前配置：{provider?.profile ?? "默认"}</p>
+            <p>当前配置：{provider?.profile ?? "官方通道"}</p>
           </div>
           <div className="profileOverviewGrid">
             <div className="fieldLine">
@@ -492,7 +495,7 @@ function OverviewView({
             </div>
             <div className="fieldLine">
               <span>配置档</span>
-              <strong>{provider?.profile ?? "默认"}</strong>
+              <strong>{provider?.profile ?? "官方通道"}</strong>
             </div>
           </div>
         </div>
@@ -810,6 +813,7 @@ function ProviderView({
   const [showToken, setShowToken] = React.useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState("");
+  const [pendingChannel, setPendingChannel] = React.useState<RunMode | null>(null);
   const currentMode = snapshotMode;
   const visibleProfiles: ProviderProfile[] = isCreatingProfile
     ? [{
@@ -881,6 +885,40 @@ function ProviderView({
   const saveMixedRelay = () => saveApiChannel("hybridApi", "混合中转");
   const saveNoAuthChannel = () => saveApiChannel("api", "无账号");
 
+  const applyChannel = (mode: RunMode) => {
+    if (pendingAction || pendingChannel === mode) return;
+    if (mode !== "official" && !activeProfile?.id) {
+      onMessage("请先选择一个可用配置档");
+      return;
+    }
+    setPendingChannel(mode);
+    onProgress(`正在切换${runModeLabel(mode)}`);
+    onMessage(`正在切换${runModeLabel(mode)}`);
+    const request =
+      mode === "official"
+        ? callBackend<string>("clear_provider")
+        : callBackend<string>("apply_provider", {
+            request: {
+              profileId: activeProfile?.id,
+              mode,
+            },
+          });
+    request
+      .then((message) => {
+        onMessage(message);
+        setSelectedChannel(mode);
+        onRefresh();
+      })
+      .catch((error) => {
+        onMessage(String(error));
+        setSelectedChannel(snapshotMode);
+      })
+      .finally(() => {
+        setPendingChannel(null);
+        onProgress("");
+      });
+  };
+
   const newProfile = () => {
     setEditingId("");
     setProfileName("新通道");
@@ -926,27 +964,6 @@ function ProviderView({
       .catch((error) => onMessage(String(error)));
   };
 
-  const clear = () => {
-    if (pendingAction) return;
-    setPendingAction("clear");
-    onProgress("正在保存官方通道");
-    onMessage("正在保存官方通道");
-    callBackend<string>("clear_provider")
-      .then((message) => {
-        onMessage(message);
-        onRefresh();
-      })
-      .catch((error) => onMessage(String(error)))
-      .finally(() => {
-        setPendingAction("");
-        onProgress("");
-      });
-  };
-
-  const saveOfficialChannel = () => {
-    clear();
-  };
-
   return (
     <div className="providerLayout">
       <section className="panel widePanel statusPanel">
@@ -985,25 +1002,25 @@ function ProviderView({
           <ModeCard
             active={selectedChannel === "official"}
             description="使用 Codex/ChatGPT 官方登录，不写入自定义模型供应商。"
-            disabled={Boolean(pendingAction)}
+            disabled={Boolean(pendingAction || pendingChannel)}
             icon={BadgeCheck}
-            onClick={() => setSelectedChannel("official")}
+            onClick={() => applyChannel("official")}
             title="官方通道"
           />
           <ModeCard
             active={selectedChannel === "hybridApi"}
             description="保留 Codex/ChatGPT 登录，把 Codex 请求转换后转到当前上游 API 配置。"
-            disabled={Boolean(pendingAction)}
+            disabled={Boolean(pendingAction || pendingChannel)}
             icon={Network}
-            onClick={() => setSelectedChannel("hybridApi")}
+            onClick={() => applyChannel("hybridApi")}
             title="混合中转"
           />
           <ModeCard
             active={selectedChannel === "api"}
             description="不依赖 Codex/ChatGPT 登录，直接使用当前 API 配置。"
-            disabled={Boolean(pendingAction)}
+            disabled={Boolean(pendingAction || pendingChannel)}
             icon={Bot}
-            onClick={() => setSelectedChannel("api")}
+            onClick={() => applyChannel("api")}
             title="无账号"
           />
         </div>
@@ -1088,7 +1105,7 @@ function ProviderView({
                           onClick={selectedChannel === "api" ? saveNoAuthChannel : saveMixedRelay}
                           type="button"
                         >
-                          {pendingAction === "save" ? "保存中" : "保存"}
+                          {pendingAction === "save" ? "保存中" : "保存配置"}
                         </button>
                       </div>
                     </>
@@ -1112,11 +1129,6 @@ function ProviderView({
           <div className="officialBox">
             <strong>使用 Codex/ChatGPT 官方登录</strong>
             <span>不会写入 CodexPilot 模型供应商，也不会使用自定义 API 配置。</span>
-          </div>
-          <div className="profileSaveRow">
-            <button className="primary" disabled={Boolean(pendingAction)} onClick={saveOfficialChannel} type="button">
-              {pendingAction === "clear" ? "保存中" : "保存"}
-            </button>
           </div>
         </section>
       )}
