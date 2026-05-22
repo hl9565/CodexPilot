@@ -1,5 +1,10 @@
 # Provider Channel Simplification Design
 
+> Updated by `2026-05-22-extensible-relay-protocol-design.md`.
+> The newer design keeps this page's simplification goals, but expands the
+> product model to support protocol-aware API channels and reintroduces a
+> user-facing no-login channel as `无账号`.
+
 ## Context
 
 The current Provider page exposes too much implementation detail. It presents three run modes, a separate login status action row, a profile list, and a separate editor panel. This makes the page feel like a technical control surface rather than a simple way to choose how Codex sends model requests.

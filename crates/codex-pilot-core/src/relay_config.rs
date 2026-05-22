@@ -7,6 +7,8 @@ use serde_json::Value;
 
 pub const RELAY_PROVIDER: &str = "CodexPilot";
 
+pub use crate::protocol_proxy::UpstreamProtocol;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatGptAuthStatus {
@@ -28,6 +30,7 @@ pub struct RelayProviderConfig {
     pub requires_openai_auth: bool,
     pub has_bearer_token: bool,
     pub base_url: Option<String>,
+    pub upstream_protocol: UpstreamProtocol,
     pub config_path: String,
 }
 
@@ -95,7 +98,11 @@ pub fn apply_relay_provider_config(
     base_url: &str,
     bearer_token: &str,
 ) -> anyhow::Result<RelayApplyResult> {
-    apply_relay_provider_config_to_home(&codex_home_dir(), base_url, bearer_token)
+    apply_relay_provider_config_with_protocol(
+        base_url,
+        bearer_token,
+        UpstreamProtocol::Responses,
+    )
 }
 
 pub fn apply_relay_provider_config_to_home(
@@ -103,21 +110,66 @@ pub fn apply_relay_provider_config_to_home(
     base_url: &str,
     bearer_token: &str,
 ) -> anyhow::Result<RelayApplyResult> {
+    apply_relay_provider_config_to_home_with_protocol(
+        home,
+        base_url,
+        bearer_token,
+        UpstreamProtocol::Responses,
+    )
+}
+
+pub fn apply_relay_provider_config_with_protocol(
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
+) -> anyhow::Result<RelayApplyResult> {
+    apply_relay_provider_config_to_home_with_protocol(
+        &codex_home_dir(),
+        base_url,
+        bearer_token,
+        upstream_protocol,
+    )
+}
+
+pub fn apply_relay_provider_config_to_home_with_protocol(
+    home: &Path,
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
+) -> anyhow::Result<RelayApplyResult> {
     let auth = chatgpt_auth_status_from_home(home);
     if !auth.authenticated {
         anyhow::bail!("{}", auth.message);
     }
-    apply_relay_provider_config_to_path(&home.join("config.toml"), base_url, bearer_token)
+    apply_relay_provider_config_to_path_with_protocol(
+        &home.join("config.toml"),
+        base_url,
+        bearer_token,
+        upstream_protocol,
+    )
 }
 
 pub fn apply_api_provider_config(
     base_url: &str,
     bearer_token: &str,
 ) -> anyhow::Result<RelayApplyResult> {
-    apply_api_provider_config_to_path(
+    apply_api_provider_config_with_protocol(
+        base_url,
+        bearer_token,
+        UpstreamProtocol::Responses,
+    )
+}
+
+pub fn apply_api_provider_config_with_protocol(
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
+) -> anyhow::Result<RelayApplyResult> {
+    apply_api_provider_config_to_path_with_protocol(
         &crate::app_paths::codex_config_path(),
         base_url,
         bearer_token,
+        upstream_protocol,
     )
 }
 
@@ -125,6 +177,20 @@ pub fn apply_relay_provider_config_to_path(
     config_path: &Path,
     base_url: &str,
     bearer_token: &str,
+) -> anyhow::Result<RelayApplyResult> {
+    apply_relay_provider_config_to_path_with_protocol(
+        config_path,
+        base_url,
+        bearer_token,
+        UpstreamProtocol::Responses,
+    )
+}
+
+pub fn apply_relay_provider_config_to_path_with_protocol(
+    config_path: &Path,
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
 ) -> anyhow::Result<RelayApplyResult> {
     let base_url = base_url.trim();
     if base_url.is_empty() {
@@ -142,7 +208,17 @@ pub fn apply_relay_provider_config_to_path(
 
     let existing = std::fs::read_to_string(config_path).unwrap_or_default();
     let backup_path = backup_existing_config(config_path, &existing)?;
-    let updated = upsert_relay_provider_config(&existing, base_url, bearer_token);
+    let codex_base_url = crate::protocol_proxy::proxy_base_url_for_protocol(
+        base_url,
+        upstream_protocol,
+        crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+    );
+    let updated = upsert_relay_provider_config(
+        &existing,
+        &codex_base_url,
+        bearer_token,
+        upstream_protocol,
+    );
     std::fs::write(config_path, updated)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
 
@@ -158,6 +234,20 @@ pub fn apply_api_provider_config_to_path(
     config_path: &Path,
     base_url: &str,
     bearer_token: &str,
+) -> anyhow::Result<RelayApplyResult> {
+    apply_api_provider_config_to_path_with_protocol(
+        config_path,
+        base_url,
+        bearer_token,
+        UpstreamProtocol::Responses,
+    )
+}
+
+pub fn apply_api_provider_config_to_path_with_protocol(
+    config_path: &Path,
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
 ) -> anyhow::Result<RelayApplyResult> {
     let base_url = base_url.trim();
     if base_url.is_empty() {
@@ -175,7 +265,17 @@ pub fn apply_api_provider_config_to_path(
 
     let existing = std::fs::read_to_string(config_path).unwrap_or_default();
     let backup_path = backup_existing_config(config_path, &existing)?;
-    let updated = upsert_api_provider_config(&existing, base_url, bearer_token);
+    let codex_base_url = crate::protocol_proxy::proxy_base_url_for_protocol(
+        base_url,
+        upstream_protocol,
+        crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+    );
+    let updated = upsert_api_provider_config(
+        &existing,
+        &codex_base_url,
+        bearer_token,
+        upstream_protocol,
+    );
     std::fs::write(config_path, updated)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
 
@@ -252,6 +352,10 @@ fn relay_provider_config_from_contents(
         .map(|value| unquote_toml_string(value))
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let upstream_protocol = base_url
+        .as_deref()
+        .map(infer_upstream_protocol_from_base_url)
+        .unwrap_or_default();
     let mode = if active && requires_openai_auth {
         "hybridApi"
     } else if active && base_url.is_some() && has_bearer_token {
@@ -274,6 +378,7 @@ fn relay_provider_config_from_contents(
         requires_openai_auth,
         has_bearer_token,
         base_url,
+        upstream_protocol,
         config_path: config_path.to_string_lossy().to_string(),
     }
 }
@@ -387,7 +492,12 @@ fn backup_existing_config(config_path: &Path, existing: &str) -> anyhow::Result<
     Ok(Some(backup_path))
 }
 
-fn upsert_relay_provider_config(contents: &str, base_url: &str, bearer_token: &str) -> String {
+fn upsert_relay_provider_config(
+    contents: &str,
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
+) -> String {
     let mut updated = upsert_root_keys(
         contents,
         &[(
@@ -407,6 +517,10 @@ fn upsert_relay_provider_config(contents: &str, base_url: &str, bearer_token: &s
         "requires_openai_auth = true".to_string(),
         format!("base_url = \"{}\"", toml_escape(base_url)),
         format!(
+            "codex_pilot_upstream_protocol = \"{}\"",
+            upstream_protocol.as_config_value()
+        ),
+        format!(
             "experimental_bearer_token = \"{}\"",
             toml_escape(bearer_token)
         ),
@@ -416,7 +530,12 @@ fn upsert_relay_provider_config(contents: &str, base_url: &str, bearer_token: &s
     finish_lines(lines)
 }
 
-fn upsert_api_provider_config(contents: &str, base_url: &str, bearer_token: &str) -> String {
+fn upsert_api_provider_config(
+    contents: &str,
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
+) -> String {
     let mut updated = upsert_root_keys(
         contents,
         &[
@@ -440,6 +559,10 @@ fn upsert_api_provider_config(contents: &str, base_url: &str, bearer_token: &str
         "wire_api = \"responses\"".to_string(),
         "env_key = \"OPENAI_API_KEY\"".to_string(),
         format!("base_url = \"{}\"", toml_escape(base_url)),
+        format!(
+            "codex_pilot_upstream_protocol = \"{}\"",
+            upstream_protocol.as_config_value()
+        ),
         String::new(),
     ];
     lines.splice(insert_at..insert_at, provider_lines);
@@ -580,6 +703,25 @@ fn toml_escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn infer_upstream_protocol_from_base_url(base_url: &str) -> UpstreamProtocol {
+    if base_url.starts_with("http://127.0.0.1:")
+        || base_url.starts_with("http://localhost:")
+    {
+        return UpstreamProtocol::ChatCompletions;
+    }
+    UpstreamProtocol::Responses
+}
+
+impl UpstreamProtocol {
+    fn as_config_value(self) -> &'static str {
+        match self {
+            UpstreamProtocol::Responses => "responses",
+            UpstreamProtocol::ChatCompletions => "chat_completions",
+            UpstreamProtocol::AnthropicMessages => "anthropic_messages",
+        }
+    }
+}
+
 fn finish_lines(lines: Vec<String>) -> String {
     let mut output = lines.join("\n");
     if !output.ends_with('\n') {
@@ -650,7 +792,12 @@ base_url = "https://other.example/v1"
 base_url = "http://127.0.0.1:8000"
 "#;
 
-        let updated = upsert_relay_provider_config(contents, "https://new.example/v1", "sk-new");
+        let updated = upsert_relay_provider_config(
+            contents,
+            "https://new.example/v1",
+            "sk-new",
+            UpstreamProtocol::Responses,
+        );
 
         assert!(updated.contains("# keep this"));
         assert!(updated.contains("model = \"gpt-5\""));
@@ -683,7 +830,12 @@ base_url = "https://old.example/v1"
 base_url = "http://127.0.0.1:8000"
 "#;
 
-        let updated = upsert_api_provider_config(contents, "https://api.example/v1", "sk-api");
+        let updated = upsert_api_provider_config(
+            contents,
+            "https://api.example/v1",
+            "sk-api",
+            UpstreamProtocol::Responses,
+        );
 
         assert!(updated.contains("# keep this"));
         assert!(updated.contains("model = \"gpt-5\""));

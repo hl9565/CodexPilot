@@ -67,10 +67,12 @@ type ProviderProfile = {
   baseUrl: string;
   bearerToken: string;
   mode: ProviderProfileMode;
+  upstreamProtocol: UpstreamProtocol;
 };
 
 type RunMode = "official" | "hybridApi" | "api";
 type ProviderProfileMode = "hybridApi" | "api";
+type UpstreamProtocol = "responses" | "chatCompletions" | "anthropicMessages";
 
 type ProviderProfileSaveResponse = {
   id: string;
@@ -798,24 +800,30 @@ function ProviderView({
   const activeProfileId = provider?.activeProfileId || profiles[0]?.id || "";
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0] ?? null;
   const snapshotMode = provider?.mode ?? "official";
-  const [selectedChannel, setSelectedChannel] = React.useState<"official" | "hybridApi">(
-    snapshotMode === "official" ? "official" : "hybridApi"
-  );
-  const customChannelSelected = selectedChannel === "hybridApi";
+  const [selectedChannel, setSelectedChannel] = React.useState<RunMode>(snapshotMode);
+  const customChannelSelected = selectedChannel !== "official";
   const [editingId, setEditingId] = React.useState("");
   const [profileName, setProfileName] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [bearerToken, setBearerToken] = React.useState("");
+  const [upstreamProtocol, setUpstreamProtocol] = React.useState<UpstreamProtocol>("responses");
   const [showToken, setShowToken] = React.useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState("");
   const currentMode = snapshotMode;
   const visibleProfiles: ProviderProfile[] = isCreatingProfile
-    ? [{ id: "", name: profileName || "新中转", baseUrl, bearerToken, mode: "hybridApi" }]
+    ? [{
+        id: "",
+        name: profileName || "新通道",
+        baseUrl,
+        bearerToken,
+        mode: selectedChannel === "api" ? "api" : "hybridApi",
+        upstreamProtocol,
+      }]
     : profiles;
 
   React.useEffect(() => {
-    setSelectedChannel(snapshotMode === "official" ? "official" : "hybridApi");
+    setSelectedChannel(snapshotMode);
   }, [snapshotMode]);
 
   React.useEffect(() => {
@@ -824,24 +832,26 @@ function ProviderView({
     setProfileName(activeProfile.name);
     setBaseUrl(activeProfile.baseUrl);
     setBearerToken(activeProfile.bearerToken);
+    setUpstreamProtocol(activeProfile.upstreamProtocol ?? "responses");
   }, [activeProfile?.id, isCreatingProfile]);
 
-  const saveMixedRelay = () => {
+  const saveApiChannel = (mode: ProviderProfileMode, messageLabel: string) => {
     if (pendingAction) return;
     if (!profileName.trim() || !baseUrl.trim() || !bearerToken.trim()) {
-      onMessage("名称、Base URL 和 Key 不能为空");
+      onMessage("配置名称、Base URL 和 API Key 不能为空");
       return;
     }
     setPendingAction("save");
-    onProgress("正在保存混合中转");
-    onMessage("正在保存混合中转");
+    onProgress(`正在保存${messageLabel}`);
+    onMessage(`正在保存${messageLabel}`);
     callBackend<ProviderProfileSaveResponse>("save_provider_profile", {
       request: {
         id: editingId || null,
         name: profileName,
         baseUrl,
         bearerToken,
-        mode: "hybridApi",
+        mode,
+        upstreamProtocol,
         activate: true,
       },
     })
@@ -852,7 +862,7 @@ function ProviderView({
         return callBackend<string>("apply_provider", {
           request: {
             profileId: saveResult.id,
-            mode: "hybridApi",
+            mode,
           },
         });
       })
@@ -868,11 +878,15 @@ function ProviderView({
       });
   };
 
+  const saveMixedRelay = () => saveApiChannel("hybridApi", "混合中转");
+  const saveNoAuthChannel = () => saveApiChannel("api", "无账号");
+
   const newProfile = () => {
     setEditingId("");
-    setProfileName("新中转");
+    setProfileName("新通道");
     setBaseUrl("");
     setBearerToken("");
+    setUpstreamProtocol("responses");
     setShowToken(false);
     setIsCreatingProfile(true);
   };
@@ -884,6 +898,8 @@ function ProviderView({
         setProfileName(profile.name);
         setBaseUrl(profile.baseUrl);
         setBearerToken(profile.bearerToken);
+        setUpstreamProtocol(profile.upstreamProtocol ?? "responses");
+        setSelectedChannel(profile.mode);
         setIsCreatingProfile(false);
         onMessage(message);
         onRefresh();
@@ -976,11 +992,19 @@ function ProviderView({
           />
           <ModeCard
             active={selectedChannel === "hybridApi"}
-            description="保留 Codex/ChatGPT 登录，把模型请求转到当前 API 配置。"
+            description="保留 Codex/ChatGPT 登录，把 Codex 请求转换后转到当前上游 API 配置。"
             disabled={Boolean(pendingAction)}
             icon={Network}
             onClick={() => setSelectedChannel("hybridApi")}
             title="混合中转"
+          />
+          <ModeCard
+            active={selectedChannel === "api"}
+            description="不依赖 Codex/ChatGPT 登录，直接使用当前 API 配置。"
+            disabled={Boolean(pendingAction)}
+            icon={Bot}
+            onClick={() => setSelectedChannel("api")}
+            title="无账号"
           />
         </div>
       </section>
@@ -999,13 +1023,13 @@ function ProviderView({
               return (
                 <div className={`profileItem ${selected ? "active" : ""}`} key={profile.id || "new"}>
                   {selected ? (
-                    <div className="profileEditorHeader">
-                      <div className="profileEditorTitle">
-                        <span className="pill ok">当前配置</span>
-                        <span>混合中转配置</span>
-                      </div>
-                      {editingId && (
-                        <button className="profileDelete" onClick={deleteProfile} type="button">
+                      <div className="profileEditorHeader">
+                        <div className="profileEditorTitle">
+                          <span className="pill ok">当前配置</span>
+                          <span>{selectedChannel === "api" ? "无账号配置" : "混合中转配置"}</span>
+                        </div>
+                        {editingId && (
+                          <button className="profileDelete" onClick={deleteProfile} type="button">
                           删除配置
                         </button>
                       )}
@@ -1014,7 +1038,7 @@ function ProviderView({
                     <div className="profileItemHeader">
                       <button className="profileSelectArea" onClick={() => profile.id && selectProfile(profile)} type="button">
                         <strong>{profile.name || "新中转"}</strong>
-                        <span>{`混合中转 · ${profile.baseUrl || "未填写 Base URL"}`}</span>
+                        <span>{`${profile.mode === "api" ? "无账号" : "混合中转"} · ${upstreamProtocolLabel(profile.upstreamProtocol)} · ${profile.baseUrl || "未填写 Base URL"}`}</span>
                       </button>
                     </div>
                   )}
@@ -1043,9 +1067,27 @@ function ProviderView({
                             </button>
                           </div>
                         </label>
+                        <label>
+                          <span>上游协议</span>
+                          <select value={upstreamProtocol} onChange={(event) => setUpstreamProtocol(event.target.value as UpstreamProtocol)}>
+                            <option value="responses">Responses API</option>
+                            <option value="chatCompletions">Chat Completions</option>
+                          </select>
+                        </label>
                       </div>
+                      {upstreamProtocol === "chatCompletions" ? (
+                        <div className="officialBox">
+                          <strong>本地协议转换</strong>
+                          <span>Codex 仍连接本地 Responses 入口，CodexPilot 会把请求转换到 Chat Completions 上游。</span>
+                        </div>
+                      ) : null}
                       <div className="profileSaveRow">
-                        <button className="primary" disabled={Boolean(pendingAction)} onClick={saveMixedRelay} type="button">
+                        <button
+                          className="primary"
+                          disabled={Boolean(pendingAction)}
+                          onClick={selectedChannel === "api" ? saveNoAuthChannel : saveMixedRelay}
+                          type="button"
+                        >
                           {pendingAction === "save" ? "保存中" : "保存"}
                         </button>
                       </div>
@@ -1114,8 +1156,15 @@ function ModeCard({
 }
 
 function runModeLabel(mode: RunMode): string {
-  if (mode === "hybridApi" || mode === "api") return "混合中转";
+  if (mode === "hybridApi") return "混合中转";
+  if (mode === "api") return "无账号";
   return "官方通道";
+}
+
+function upstreamProtocolLabel(protocol: UpstreamProtocol): string {
+  if (protocol === "chatCompletions") return "Chat Completions";
+  if (protocol === "anthropicMessages") return "Anthropic Messages";
+  return "Responses API";
 }
 
 function RecycleBinView({

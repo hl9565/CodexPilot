@@ -49,14 +49,14 @@ Hybrid Relay is for users who have already completed the official Codex/ChatGPT 
 
 ![CodexPilot model channel page](images/readme-provider.png)
 
-Base URL and API Key come from a third-party or self-hosted OpenAI-compatible API. The official login state keeps Codex/ChatGPT login compatibility and the cross-device control experience; once Hybrid Relay is enabled, model requests are sent to the custom Provider you configured, and that Provider's privacy, billing, and data handling policies apply.
+Base URL and API Key come from a third-party or self-hosted API endpoint. In the first protocol-expansion release, CodexPilot supports upstreams that already speak Responses API and upstreams that only speak Chat Completions. The official login state keeps Codex/ChatGPT login compatibility and the cross-device control experience; once Hybrid Relay is enabled, model requests are sent to the custom Provider you configured, and that Provider's privacy, billing, and data handling policies apply.
 
 Setup steps:
 
 1. Log in with ChatGPT in the original Codex App.
 2. Open CodexPilot Manager and go to Model Channel.
 3. Create or select a relay profile.
-4. Fill in Base URL and API Key, then save the profile.
+4. Fill in Base URL, API Key, and the upstream protocol, then save the profile.
 5. Choose Hybrid Relay and save.
 6. Launch or re-inject Codex from CodexPilot.
 
@@ -74,6 +74,17 @@ experimental_bearer_token = "sk-..."
 ```
 
 If CodexPilot does not detect a ChatGPT login state in `~/.codex/auth.json`, it refuses to save Hybrid Relay configuration.
+
+### No-Account Channel
+
+No-Account Channel is for users who want to use a configured API provider without relying on Codex/ChatGPT login state. It uses the same profile model as Hybrid Relay, including upstream protocol selection, but it does not require official login and does not preserve the official cross-device control path.
+
+In the current release, the same upstream protocol choices apply:
+
+- Responses API
+- Chat Completions
+
+When the selected upstream only supports Chat Completions, CodexPilot writes a local Responses endpoint into Codex config and performs protocol conversion through its local helper service.
 
 ### Official Channel
 
@@ -133,7 +144,7 @@ CodexPilot reads or writes these local paths:
 
 Relay profiles are saved locally. API keys are hidden in status panels, but they are still stored in local configuration files. Use CodexPilot only on trusted devices, and avoid uploading local config, logs, screenshots, or backup directories to public repositories.
 
-When using a custom compatible API, verify the provider's privacy, billing, and data handling policies yourself.
+When using a custom API, verify the provider's privacy, billing, and data handling policies yourself.
 
 CodexPilot also uses a local loopback debug port and a local helper port. Chromium DevTools Protocol connections can execute page scripts, so use CodexPilot only in a trusted local environment.
 
@@ -141,7 +152,7 @@ Additional data locations:
 
 - `~/.codex/config.toml.codex-pilot-backup-*.bak`: config backups kept before model-channel writes; they may contain old API keys.
 - `~/.codex/.codex-pilot-undo/`: undo/recycle-bin backups created after deleting sessions.
-- `provider-profiles.json` under the CodexPilot app state directory: relay profiles containing Base URL and API Key. On macOS/Linux this is usually under `~/.config/CodexPilot/`; on Windows it is usually under `%APPDATA%\CodexPilot\`.
+- `provider-profiles.json` under the CodexPilot app state directory: channel profiles containing Base URL, API Key, and upstream protocol metadata. On macOS/Linux this is usually under `~/.config/CodexPilot/`; on Windows it is usually under `%APPDATA%\CodexPilot\`.
 
 ## Compatibility
 

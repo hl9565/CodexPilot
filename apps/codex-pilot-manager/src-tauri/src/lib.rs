@@ -155,13 +155,17 @@ impl ProviderProfileMode {
     fn label(self) -> &'static str {
         match self {
             ProviderProfileMode::HybridApi => "混合中转",
-            ProviderProfileMode::Api => "API 中转",
+            ProviderProfileMode::Api => "无账号",
         }
     }
 }
 
 fn default_provider_profile_mode() -> ProviderProfileMode {
     ProviderProfileMode::HybridApi
+}
+
+fn default_upstream_protocol() -> codex_pilot_core::protocol_proxy::UpstreamProtocol {
+    codex_pilot_core::protocol_proxy::UpstreamProtocol::Responses
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -173,6 +177,8 @@ struct ProviderProfile {
     bearer_token: String,
     #[serde(default = "default_provider_profile_mode")]
     mode: ProviderProfileMode,
+    #[serde(default = "default_upstream_protocol")]
+    upstream_protocol: codex_pilot_core::protocol_proxy::UpstreamProtocol,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,6 +198,7 @@ impl Default for ProviderProfilesState {
                 base_url: String::new(),
                 bearer_token: String::new(),
                 mode: ProviderProfileMode::HybridApi,
+                upstream_protocol: default_upstream_protocol(),
             }],
         }
     }
@@ -205,6 +212,8 @@ struct ProviderProfileSaveRequest {
     base_url: String,
     bearer_token: String,
     mode: ProviderProfileMode,
+    #[serde(default = "default_upstream_protocol")]
+    upstream_protocol: codex_pilot_core::protocol_proxy::UpstreamProtocol,
     activate: bool,
 }
 
@@ -479,18 +488,27 @@ async fn apply_provider(request: ProviderApplyRequest) -> Result<String, String>
     let base_url = profile.base_url;
     let bearer_token = profile.bearer_token;
     let mode = request.mode.unwrap_or(profile.mode);
+    let upstream_protocol = profile.upstream_protocol;
+    if upstream_protocol == codex_pilot_core::protocol_proxy::UpstreamProtocol::AnthropicMessages {
+        return Err("Anthropic Messages 适配尚未实现，当前不能应用该配置。".to_string());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let result = match mode {
             ProviderProfileMode::HybridApi => {
-                codex_pilot_core::relay_config::apply_relay_provider_config(
+                codex_pilot_core::relay_config::apply_relay_provider_config_with_protocol(
                     &base_url,
                     &bearer_token,
+                    upstream_protocol,
                 )
                 .map_err(|error| format!("应用混合中转失败：{error}"))?
             }
             ProviderProfileMode::Api => {
-                codex_pilot_core::relay_config::apply_api_provider_config(&base_url, &bearer_token)
-                    .map_err(|error| format!("应用 API 中转失败：{error}"))?
+                codex_pilot_core::relay_config::apply_api_provider_config_with_protocol(
+                    &base_url,
+                    &bearer_token,
+                    upstream_protocol,
+                )
+                .map_err(|error| format!("应用无账号通道失败：{error}"))?
             }
         };
         Ok(result
@@ -509,6 +527,12 @@ fn save_provider_profile(
     let mut state = load_provider_profiles();
     let activate = request.activate;
     let profile = sanitize_provider_profile(request)?;
+    let normalized_name = profile.name.trim();
+    if state.profiles.iter().any(|item| {
+        item.id != profile.id && item.name.trim().eq_ignore_ascii_case(normalized_name)
+    }) {
+        return Err("配置档名称不能重复。".to_string());
+    }
     let id = profile.id.clone();
     if let Some(existing) = state.profiles.iter_mut().find(|item| item.id == id) {
         *existing = profile;
@@ -1235,6 +1259,7 @@ fn sanitize_provider_profile(
     let base_url = request.base_url.trim().to_string();
     let bearer_token = request.bearer_token.trim().to_string();
     let mode = request.mode;
+    let upstream_protocol = request.upstream_protocol;
     if name.is_empty() {
         return Err("配置档名称不能为空。".to_string());
     }
@@ -1250,6 +1275,7 @@ fn sanitize_provider_profile(
         base_url,
         bearer_token,
         mode,
+        upstream_protocol,
     })
 }
 
@@ -1265,6 +1291,7 @@ fn sanitize_provider_profiles_state(
             base_url: profile.base_url.trim().to_string(),
             bearer_token: profile.bearer_token.trim().to_string(),
             mode: profile.mode,
+            upstream_protocol: profile.upstream_protocol,
         })
         .filter(|profile| !profile.id.is_empty() && !profile.name.is_empty())
         .collect();

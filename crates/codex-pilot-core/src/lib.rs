@@ -6,6 +6,7 @@ pub mod diagnostic_log;
 pub mod helper;
 pub mod launcher;
 pub mod ports;
+pub mod protocol_proxy;
 pub mod relay_config;
 pub mod routes;
 pub mod status;
