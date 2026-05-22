@@ -451,7 +451,7 @@ async function flushAsyncWork() {
   assert.ok(rowActionGroup, "应创建独立的会话行操作组");
   assert.equal(rowActionGroup.children.length, 2, "会话行操作组只包含 CodexPilot 自己的按钮");
   const styleText = document.getElementById("codex-pilot-style").textContent;
-  assert.match(styleText, /right:\s*42px;/, "会话行操作组应避开 Codex 原生右侧按钮");
+  assert.match(styleText, /right:\s*76px;/, "会话行操作组应避开 Codex 原生右侧按钮");
   assert.match(styleText, /mask-image:\s*linear-gradient/, "悬停时应遮罩标题，避免文字与操作按钮重叠");
 
   const timeline = document.getElementById("codex-pilot-timeline");
