@@ -1,9 +1,148 @@
 :root {
-  color: #1d2630;
-  background: #f5f6f8;
+  --app-bg: #f5f6f8;
+  --app-preview-bg: #dfe4ea;
+  --app-text: #1d2630;
+  --app-text-strong: #1f2b3a;
+  --app-text-heading: #233044;
+  --app-text-soft: #243244;
+  --app-muted: #526071;
+  --app-muted-2: #5e6d7e;
+  --app-muted-3: #637183;
+  --app-label: #6a7889;
+  --app-subtle: #7a8798;
+  --surface: #ffffff;
+  --surface-soft: #fbfcfd;
+  --surface-subtle: #f8fafc;
+  --surface-hover: #f7f9fc;
+  --surface-active: #e9eef5;
+  --surface-control: #eef2f7;
+  --surface-control-active: #dfe7f2;
+  --border: #d7dde5;
+  --border-soft: #e2e7ee;
+  --border-strong: #b8c3d2;
+  --focus-ring: #8bb5ff;
+  --primary: #2563eb;
+  --primary-hover: #1f58db;
+  --primary-active: #194bbf;
+  --primary-border: #1e55d6;
+  --primary-text: #ffffff;
+  --primary-soft: #e7efff;
+  --primary-soft-2: #eef4ff;
+  --primary-soft-3: #fbfdff;
+  --primary-soft-border: #cbdcfb;
+  --primary-soft-border-2: #bdd1fb;
+  --primary-soft-border-3: #c9d8f5;
+  --primary-soft-hover: #f8fbff;
+  --primary-strong: #17408f;
+  --primary-link: #2459c5;
+  --primary-icon: #1f56c5;
+  --danger-bg: #fff5f5;
+  --danger-hover: #ffecec;
+  --danger-active: #ffe1e1;
+  --danger-border: #ffc9c9;
+  --danger-border-hover: #ffb4b4;
+  --danger-text: #9f1d1d;
+  --danger-action: #a53b3b;
+  --danger-action-hover: #bd3434;
+  --danger-action-bg: #fff1f1;
+  --danger-action-border: #ffd0d0;
+  --ok-bg: #ecfdf5;
+  --ok-bg-soft: #ecfdf3;
+  --ok-border: #b8e8d1;
+  --ok-text: #0f6b46;
+  --ok-dot: #17a05d;
+  --warning-bg: #fff7ed;
+  --warning-bg-2: #fff3d8;
+  --warning-border: #fed7aa;
+  --warning-text: #9a4f0c;
+  --warning-dot: #d99016;
+  --code-bg: #151922;
+  --code-text: #e6edf7;
+  --log-text: #d7e0ef;
+  --toast-bg: rgba(17, 24, 39, 0.94);
+  --toast-text: #ffffff;
+  --overlay-bg: rgba(15, 23, 42, 0.16);
+  --shadow-soft: rgba(15, 23, 42, 0.06);
+  --shadow-medium: rgba(15, 23, 42, 0.1);
+  --shadow-strong: rgba(15, 23, 42, 0.2);
+  --shadow-dialog: rgba(15, 23, 42, 0.24);
+  color: var(--app-text);
+  background: var(--app-bg);
+  color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+
+:root.dark {
+  --app-bg: #10141c;
+  --app-preview-bg: #090d13;
+  --app-text: #e7edf6;
+  --app-text-strong: #f3f6fb;
+  --app-text-heading: #eef3fb;
+  --app-text-soft: #d9e2ef;
+  --app-muted: #a6b2c3;
+  --app-muted-2: #98a6b8;
+  --app-muted-3: #8d9aad;
+  --app-label: #9ca9ba;
+  --app-subtle: #7f8da1;
+  --surface: #171d27;
+  --surface-soft: #131923;
+  --surface-subtle: #1d2531;
+  --surface-hover: #222c3a;
+  --surface-active: #273244;
+  --surface-control: #202938;
+  --surface-control-active: #273244;
+  --border: #2b3545;
+  --border-soft: #303b4d;
+  --border-strong: #46556b;
+  --focus-ring: #78a8ff;
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-active: #2563eb;
+  --primary-border: #2563eb;
+  --primary-text: #ffffff;
+  --primary-soft: #182842;
+  --primary-soft-2: #1b2d4a;
+  --primary-soft-3: #121d2e;
+  --primary-soft-border: #2f5288;
+  --primary-soft-border-2: #345f9f;
+  --primary-soft-border-3: #35527b;
+  --primary-soft-hover: #172438;
+  --primary-strong: #bfdbfe;
+  --primary-link: #93c5fd;
+  --primary-icon: #93c5fd;
+  --danger-bg: #35191d;
+  --danger-hover: #431d23;
+  --danger-active: #4d2028;
+  --danger-border: #7f3038;
+  --danger-border-hover: #9a3a44;
+  --danger-text: #fecaca;
+  --danger-action: #fca5a5;
+  --danger-action-hover: #fecaca;
+  --danger-action-bg: #3c1b21;
+  --danger-action-border: #7f3038;
+  --ok-bg: #10291f;
+  --ok-bg-soft: #10291f;
+  --ok-border: #245b42;
+  --ok-text: #86efac;
+  --ok-dot: #34d399;
+  --warning-bg: #332313;
+  --warning-bg-2: #3a2a12;
+  --warning-border: #76511d;
+  --warning-text: #facc15;
+  --warning-dot: #f59e0b;
+  --code-bg: #0b1018;
+  --code-text: #e5edf8;
+  --log-text: #cbd8ea;
+  --toast-bg: rgba(5, 10, 18, 0.96);
+  --toast-text: #f8fafc;
+  --overlay-bg: rgba(3, 7, 18, 0.58);
+  --shadow-soft: rgba(0, 0, 0, 0.16);
+  --shadow-medium: rgba(0, 0, 0, 0.22);
+  --shadow-strong: rgba(0, 0, 0, 0.36);
+  --shadow-dialog: rgba(0, 0, 0, 0.42);
+  color-scheme: dark;
 }
 
 * {
@@ -22,7 +161,7 @@ body {
 }
 
 body.uiPreviewMode {
-  background: #dfe4ea;
+  background: var(--app-preview-bg);
   overflow: auto;
 }
 
@@ -50,10 +189,10 @@ button:disabled {
 
 input,
 select {
-  background: #ffffff;
-  border: 1px solid #cfd7e2;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 7px;
-  color: #1d2630;
+  color: var(--app-text);
   font: inherit;
   font-size: 13px;
   min-height: 32px;
@@ -62,7 +201,7 @@ select {
 }
 
 input[type="checkbox"] {
-  accent-color: #2563eb;
+  accent-color: var(--primary);
   min-height: 16px;
   padding: 0;
   width: 16px;
@@ -85,9 +224,9 @@ input[type="checkbox"] {
 }
 
 .previewWindow {
-  background: #f5f6f8;
-  border: 1px solid #b8c3d2;
-  box-shadow: 0 18px 45px rgba(20, 30, 45, 0.18);
+  background: var(--app-bg);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 18px 45px var(--shadow-strong);
   height: 760px;
   overflow: auto;
   width: 1120px;
@@ -98,8 +237,8 @@ input[type="checkbox"] {
 }
 
 .sidebar {
-  background: #fbfcfd;
-  border-right: 1px solid #d7dde5;
+  background: var(--surface-soft);
+  border-right: 1px solid var(--border);
   height: 100vh;
   overflow: auto;
   padding: 14px 10px;
@@ -115,7 +254,7 @@ input[type="checkbox"] {
 }
 
 .brand svg {
-  color: #2563eb;
+  color: var(--primary);
 }
 
 .navList {
@@ -128,7 +267,7 @@ input[type="checkbox"] {
   background: transparent;
   border: 0;
   border-radius: 7px;
-  color: #526071;
+  color: var(--app-muted);
   cursor: pointer;
   display: flex;
   font-size: 13px;
@@ -140,17 +279,17 @@ input[type="checkbox"] {
 }
 
 .nav:hover {
-  background: #f0f3f7;
-  color: #243244;
+  background: var(--surface-control);
+  color: var(--app-text-soft);
 }
 
 .nav:active {
-  background: #dfe7f2;
+  background: var(--surface-control-active);
 }
 
 .nav.active {
-  background: #e7efff;
-  color: #17408f;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
   font-weight: 650;
 }
 
@@ -196,7 +335,7 @@ h2 {
 }
 
 .eyebrow {
-  color: #697789;
+  color: var(--app-label);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
@@ -219,54 +358,54 @@ h2 {
 }
 
 .primary {
-  background: #2563eb;
-  border: 1px solid #1e55d6;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.1);
-  color: #ffffff;
+  background: var(--primary);
+  border: 1px solid var(--primary-border);
+  box-shadow: 0 1px 0 var(--shadow-medium);
+  color: var(--primary-text);
 }
 
 .primary:hover {
-  background: #1f58db;
-  border-color: #194bbf;
+  background: var(--primary-hover);
+  border-color: var(--primary-active);
 }
 
 .primary:active {
-  background: #194bbf;
-  box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.22);
+  background: var(--primary-active);
+  box-shadow: inset 0 2px 4px var(--shadow-strong);
 }
 
 .secondary {
-  background: #ffffff;
-  border: 1px solid #cfd7e2;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06);
-  color: #2c3745;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 0 var(--shadow-soft);
+  color: var(--app-text-heading);
 }
 
 .secondary:hover {
-  background: #f6f8fb;
-  border-color: #b8c3d2;
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .secondary:active {
-  background: #e9eef5;
-  border-color: #a8b6c8;
-  box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.08);
+  background: var(--surface-active);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 2px 4px var(--shadow-medium);
 }
 
 .dangerButton {
-  background: #fff5f5;
-  border: 1px solid #ffc9c9;
-  color: #9f1d1d;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
 }
 
 .dangerButton:hover {
-  background: #ffecec;
-  border-color: #ffb4b4;
+  background: var(--danger-hover);
+  border-color: var(--danger-border-hover);
 }
 
 .dangerButton:active {
-  background: #ffe1e1;
-  box-shadow: inset 0 2px 4px rgba(127, 29, 29, 0.12);
+  background: var(--danger-active);
+  box-shadow: inset 0 2px 4px var(--shadow-medium);
 }
 
 .primary:focus-visible,
@@ -274,7 +413,7 @@ h2 {
 .dangerButton:focus-visible,
 .nav:focus-visible,
 .profileItem:focus-visible {
-  outline: 2px solid #8bb5ff;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -285,7 +424,7 @@ h2 {
 }
 
 .message {
-  color: #5e6d7e;
+  color: var(--app-muted-2);
   font-size: 12px;
   max-width: 260px;
   overflow: hidden;
@@ -295,10 +434,10 @@ h2 {
 
 .appToast {
   animation: toastIn 140ms ease-out;
-  background: rgba(17, 24, 39, 0.94);
+  background: var(--toast-bg);
   border-radius: 8px;
-  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.2);
-  color: #ffffff;
+  box-shadow: 0 14px 32px var(--shadow-strong);
+  color: var(--toast-text);
   font-size: 13px;
   line-height: 1.45;
   max-width: min(520px, calc(100vw - 32px));
@@ -313,7 +452,7 @@ h2 {
 
 .progressOverlay {
   align-items: center;
-  background: rgba(15, 23, 42, 0.16);
+  background: var(--overlay-bg);
   display: flex;
   inset: 0;
   justify-content: center;
@@ -323,10 +462,10 @@ h2 {
 
 .progressDialog {
   animation: dialogIn 120ms ease-out;
-  background: #ffffff;
-  border: 1px solid #d7dde5;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 22px 60px rgba(15, 23, 42, 0.24);
+  box-shadow: 0 22px 60px var(--shadow-dialog);
   display: grid;
   gap: 10px;
   min-width: min(360px, calc(100vw - 36px));
@@ -334,18 +473,18 @@ h2 {
 }
 
 .progressDialog strong {
-  color: #1f2b3a;
+  color: var(--app-text-strong);
   font-size: 14px;
 }
 
 .progressDialog p {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .progressTrack {
-  background: #e7edf5;
+  background: var(--surface-control);
   border-radius: 999px;
   height: 8px;
   overflow: hidden;
@@ -354,7 +493,7 @@ h2 {
 
 .progressTrack span {
   animation: progressSweep 1.05s ease-in-out infinite;
-  background: linear-gradient(90deg, #2563eb, #14b8a6);
+  background: linear-gradient(90deg, var(--primary), var(--ok-dot));
   border-radius: inherit;
   display: block;
   height: 100%;
@@ -411,12 +550,12 @@ h2 {
 }
 
 .formStack label span {
-  color: #6a7889;
+  color: var(--app-label);
   font-size: 12px;
 }
 
 .fieldHint {
-  color: #7a8798;
+  color: var(--app-subtle);
   display: block;
   font-size: 11px;
   line-height: 1.35;
@@ -429,7 +568,7 @@ h2 {
 }
 
 .formStack .checkboxRow span {
-  color: #3c4858;
+  color: var(--app-text-heading);
   font-size: 13px;
 }
 
@@ -444,7 +583,7 @@ h2 {
 }
 
 .preferenceField span {
-  color: #6a7889;
+  color: var(--app-label);
   font-size: 12px;
 }
 
@@ -467,7 +606,7 @@ h2 {
 }
 
 .compactCheckbox span {
-  color: #4f5f72;
+  color: var(--app-muted);
   font-size: 13px;
 }
 
@@ -477,7 +616,7 @@ h2 {
 }
 
 .formMessage {
-  color: #526071;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -500,8 +639,8 @@ h2 {
 }
 
 .segmentedControl {
-  background: #eef2f7;
-  border: 1px solid #d7dde5;
+  background: var(--surface-control);
+  border: 1px solid var(--border);
   border-radius: 7px;
   display: grid;
   gap: 2px;
@@ -513,27 +652,27 @@ h2 {
   background: transparent;
   border: 0;
   border-radius: 5px;
-  color: #526071;
+  color: var(--app-muted);
   cursor: pointer;
   min-height: 32px;
 }
 
 .segmentedControl button:hover {
-  background: #f8fafc;
-  color: #243244;
+  background: var(--surface-subtle);
+  color: var(--app-text-soft);
 }
 
 .segmentedControl button.active {
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
-  color: #17408f;
+  background: var(--surface);
+  box-shadow: 0 1px 2px var(--shadow-medium);
+  color: var(--primary-strong);
   font-weight: 700;
 }
 
 .linkButton {
   background: transparent;
   border: 0;
-  color: #2459c5;
+  color: var(--primary-link);
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -541,7 +680,7 @@ h2 {
 }
 
 .linkButton:hover {
-  color: #17408f;
+  color: var(--primary-strong);
   text-decoration: underline;
 }
 
@@ -559,8 +698,8 @@ h2 {
 }
 
 .taskPanel {
-  background: #ffffff;
-  border: 1px solid #d4ddea;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: grid;
   gap: 10px;
@@ -569,8 +708,8 @@ h2 {
 }
 
 .primaryTask {
-  background: #fbfdff;
-  border-color: #bdd1fb;
+  background: var(--primary-soft-3);
+  border-color: var(--primary-soft-border-2);
 }
 
 .overviewLaunchTask {
@@ -599,7 +738,7 @@ h2 {
 
 .taskFooter {
   align-items: center;
-  color: #637183;
+  color: var(--app-muted-3);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -633,10 +772,10 @@ h2 {
 
 .titleIcon {
   align-items: center;
-  background: #e8f0ff;
-  border: 1px solid #cbdcfb;
+  background: var(--primary-soft);
+  border: 1px solid var(--primary-soft-border);
   border-radius: 7px;
-  color: #1f56c5;
+  color: var(--primary-icon);
   display: inline-grid;
   flex: 0 0 auto;
   height: 28px;
@@ -645,7 +784,7 @@ h2 {
 }
 
 .taskSummary {
-  color: #596779;
+  color: var(--app-muted-2);
   font-size: 12px;
   line-height: 1.45;
   margin-top: 6px;
@@ -653,10 +792,10 @@ h2 {
 
 .statusPill {
   align-items: center;
-  background: #eef1f5;
-  border: 1px solid #dce4ee;
+  background: var(--surface-control);
+  border: 1px solid var(--border-soft);
   border-radius: 999px;
-  color: #526071;
+  color: var(--app-muted);
   display: inline-flex;
   font-size: 12px;
   font-weight: 700;
@@ -666,15 +805,15 @@ h2 {
 }
 
 .statusPill.ok {
-  background: #ecfdf5;
-  border-color: #b8e8d1;
-  color: #0f6b46;
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok-text);
 }
 
 .statusPill.warning {
-  background: #fff7ed;
-  border-color: #fed7aa;
-  color: #9a4f0c;
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
 }
 
 .providerOverviewBody {
@@ -684,8 +823,8 @@ h2 {
 }
 
 .channelChoiceSummary {
-  background: #f8fafc;
-  border: 1px solid #dde5ef;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: grid;
   gap: 7px;
@@ -694,20 +833,20 @@ h2 {
 }
 
 .channelChoiceSummary p {
-  color: #5e6d7f;
+  color: var(--app-muted-2);
   font-size: 12px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .channelChoiceSummary .channelModeCopy {
-  color: #4f5f73;
+  color: var(--app-muted);
   line-height: 1.45;
 }
 
 .segmentedPreview {
-  background: #edf2f7;
-  border: 1px solid #dbe3ed;
+  background: var(--surface-control);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -717,7 +856,7 @@ h2 {
 .segmentedPreview span {
   align-items: center;
   border-radius: 5px;
-  color: #526174;
+  color: var(--app-muted);
   display: flex;
   font-size: 12px;
   font-weight: 700;
@@ -726,17 +865,17 @@ h2 {
 }
 
 .segmentedPreview span.active {
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(20, 30, 45, 0.12);
-  color: #1d4fa8;
+  background: var(--surface);
+  box-shadow: 0 1px 3px var(--shadow-medium);
+  color: var(--primary-strong);
 }
 
 .rowIcon {
   align-items: center;
-  background: #f0f4f8;
-  border: 1px solid #dce4ee;
+  background: var(--surface-control);
+  border: 1px solid var(--border-soft);
   border-radius: 6px;
-  color: #43536a;
+  color: var(--app-muted);
   display: inline-grid;
   flex: 0 0 auto;
   height: 26px;
@@ -757,15 +896,15 @@ h2 {
 }
 
 .fieldLine span {
-  color: #687586;
+  color: var(--app-label);
   font-size: 11px;
 }
 
 .fieldLine strong {
-  background: #ffffff;
-  border: 1px solid #d9e1eb;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: 5px;
-  color: #2f3d50;
+  color: var(--app-text-heading);
   font-size: 12px;
   font-weight: 600;
   min-width: 0;
@@ -795,8 +934,8 @@ h2 {
 }
 
 .panel {
-  background: #ffffff;
-  border: 1px solid #d7dde5;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   min-width: 0;
   padding: 12px 16px 14px;
@@ -834,7 +973,7 @@ h2 {
 }
 
 .panelTitle {
-  color: #233044;
+  color: var(--app-text-heading);
   gap: 8px;
   margin-bottom: 0;
   min-width: 0;
@@ -855,7 +994,7 @@ h2 {
 
 .modePanel code,
 .statusPanel code {
-  color: #526071;
+  color: var(--app-muted);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   overflow: hidden;
@@ -870,10 +1009,10 @@ h2 {
 }
 
 .modeCard {
-  background: #ffffff;
-  border: 1px solid #dfe5ee;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: 8px;
-  color: #1f2b3a;
+  color: var(--app-text-strong);
   cursor: pointer;
   display: grid;
   gap: 7px;
@@ -884,18 +1023,18 @@ h2 {
 }
 
 .modeCard:hover {
-  background: #f7f9fc;
-  border-color: #b8c3d2;
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
 }
 
 .modeCard:active {
-  background: #e9eef5;
+  background: var(--surface-active);
 }
 
 .modeCard.active {
-  background: #f8fbff;
-  border-color: #2563eb;
-  box-shadow: inset 0 0 0 1px #2563eb;
+  background: var(--primary-soft-hover);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
 }
 
 .modeCard strong {
@@ -903,16 +1042,16 @@ h2 {
 }
 
 .modeCard span:last-child {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .modeIcon {
   align-items: center;
-  background: #eef4ff;
+  background: var(--primary-soft-2);
   border-radius: 7px;
-  color: #2459c5;
+  color: var(--primary-link);
   display: inline-flex;
   height: 32px;
   justify-content: center;
@@ -920,8 +1059,8 @@ h2 {
 }
 
 .modeCard.active .modeIcon {
-  background: #2563eb;
-  color: #ffffff;
+  background: var(--primary);
+  color: var(--primary-text);
 }
 
 .providerStatusGrid {
@@ -951,7 +1090,7 @@ h2 {
 }
 
 .syncControls label span {
-  color: #6a7889;
+  color: var(--app-label);
   font-size: 12px;
 }
 
@@ -969,8 +1108,8 @@ h2 {
 }
 
 .syncStatusCard {
-  background: #f8fafc;
-  border: 1px solid #e2e7ee;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: grid;
   gap: 12px;
@@ -992,14 +1131,14 @@ h2 {
 }
 
 .syncStatusCard strong {
-  color: #1d2630;
+  color: var(--app-text);
   display: block;
   font-size: 14px;
   line-height: 1.3;
 }
 
 .syncStatusCard p {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
   margin: 3px 0 0;
@@ -1031,17 +1170,17 @@ h2 {
 }
 
 .syncStatusCard.ok .syncStatusIcon {
-  background: #ecfdf3;
-  color: #15803d;
+  background: var(--ok-bg-soft);
+  color: var(--ok-text);
 }
 
 .syncStatusCard.needsSync .syncStatusIcon {
-  background: #fff7ed;
-  color: #c2410c;
+  background: var(--warning-bg);
+  color: var(--warning-text);
 }
 
 .syncDetails {
-  border-top: 1px solid #e6ebf2;
+  border-top: 1px solid var(--border-soft);
   display: grid;
   gap: 10px;
   padding-top: 8px;
@@ -1049,7 +1188,7 @@ h2 {
 
 .syncDetails summary {
   border-radius: 6px;
-  color: #526071;
+  color: var(--app-muted);
   cursor: pointer;
   font-size: 13px;
   font-weight: 700;
@@ -1061,7 +1200,7 @@ h2 {
 }
 
 .syncDetails summary:focus-visible {
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  box-shadow: 0 0 0 3px var(--shadow-medium);
 }
 
 .providerDistribution {
@@ -1071,8 +1210,8 @@ h2 {
 }
 
 .distributionBox {
-  background: #f8fafc;
-  border: 1px solid #e2e7ee;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: grid;
   gap: 8px;
@@ -1081,7 +1220,7 @@ h2 {
 }
 
 .distributionBox strong {
-  color: #233044;
+  color: var(--app-text-heading);
   font-size: 13px;
 }
 
@@ -1092,10 +1231,10 @@ h2 {
 }
 
 .providerChip {
-  background: #ffffff;
-  border: 1px solid #d7dde5;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 999px;
-  color: #526071;
+  color: var(--app-muted);
   font-size: 12px;
   line-height: 1;
   max-width: 100%;
@@ -1104,15 +1243,15 @@ h2 {
 }
 
 .statusMetric {
-  background: #f8fafc;
-  border: 1px solid #e0e6ef;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   min-width: 0;
   padding: 10px;
 }
 
 .statusMetric span {
-  color: #6a7889;
+  color: var(--app-label);
   display: block;
   font-size: 10px;
   font-weight: 700;
@@ -1121,7 +1260,7 @@ h2 {
 }
 
 .statusMetric strong {
-  color: #1d2630;
+  color: var(--app-text);
   display: block;
   font-size: 13px;
   font-weight: 700;
@@ -1129,10 +1268,10 @@ h2 {
 
 .accountLine {
   align-items: baseline;
-  background: #f8fafc;
-  border: 1px solid #e2e7ee;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
-  color: #637183;
+  color: var(--app-muted-3);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -1148,7 +1287,7 @@ h2 {
 }
 
 .accountLine strong {
-  color: #526071;
+  color: var(--app-muted);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -1167,7 +1306,7 @@ h2 {
 }
 
 .loginControlHeader code {
-  color: #526071;
+  color: var(--app-muted);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   overflow: hidden;
@@ -1189,7 +1328,7 @@ h2 {
 }
 
 .summaryMeta {
-  color: #637183;
+  color: var(--app-muted-3);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -1197,13 +1336,13 @@ h2 {
 }
 
 .loginStatus strong {
-  color: #1f2b3a;
+  color: var(--app-text-strong);
   font-size: 13px;
   white-space: nowrap;
 }
 
 .loginStatus span:last-child {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1219,11 +1358,11 @@ h2 {
 }
 
 .statusDot.ok {
-  background: #17a05d;
+  background: var(--ok-dot);
 }
 
 .statusDot.warning {
-  background: #d99016;
+  background: var(--warning-dot);
 }
 
 .metricGrid {
@@ -1233,20 +1372,20 @@ h2 {
 }
 
 dt {
-  color: #6a7889;
+  color: var(--app-label);
   font-size: 12px;
   margin-bottom: 4px;
 }
 
 dd {
-  color: #1d2630;
+  color: var(--app-text);
   font-size: 15px;
   font-weight: 700;
   overflow-wrap: anywhere;
 }
 
 .rows {
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   overflow: hidden;
 }
@@ -1261,24 +1400,24 @@ dd {
 }
 
 .row + .row {
-  border-top: 1px solid #e2e7ee;
+  border-top: 1px solid var(--border-soft);
 }
 
 .row span {
-  color: #6a7889;
+  color: var(--app-label);
   font-size: 12px;
 }
 
 .row strong {
-  color: #1f2b3a;
+  color: var(--app-text-strong);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
 .commandBlock {
-  background: #151922;
+  background: var(--code-bg);
   border-radius: 7px;
-  color: #e6edf7;
+  color: var(--code-text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.55;
@@ -1291,9 +1430,9 @@ dd {
 }
 
 .logBlock {
-  background: #151922;
+  background: var(--code-bg);
   border-radius: 7px;
-  color: #d7e0ef;
+  color: var(--log-text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11px;
   line-height: 1.5;
@@ -1306,13 +1445,13 @@ dd {
 }
 
 .bodyText {
-  color: #5e6d7e;
+  color: var(--app-muted-2);
   font-size: 13px;
   line-height: 1.5;
 }
 
 .tableWrap {
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   max-height: 270px;
   overflow: auto;
@@ -1326,7 +1465,7 @@ dd {
 
 .dataTable th,
 .dataTable td {
-  border-bottom: 1px solid #e2e7ee;
+  border-bottom: 1px solid var(--border-soft);
   height: 33px;
   max-width: 0;
   padding: 4px 10px;
@@ -1335,8 +1474,8 @@ dd {
 }
 
 .dataTable th {
-  background: #f7f9fc;
-  color: #5e6d7e;
+  background: var(--surface-hover);
+  color: var(--app-muted-2);
   font-size: 12px;
   font-weight: 700;
   position: sticky;
@@ -1346,7 +1485,7 @@ dd {
 }
 
 .dataTable td {
-  color: #243244;
+  color: var(--app-text-soft);
   font-size: 12px;
   line-height: 1.2;
 }
@@ -1378,7 +1517,7 @@ dd {
 }
 
 .cellText {
-  color: #243244;
+  color: var(--app-text-soft);
   display: block;
   min-width: 0;
   overflow: hidden;
@@ -1401,10 +1540,10 @@ dd {
 }
 
 .profileItem {
-  background: #ffffff;
-  border: 1px solid #e2e7ee;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
-  color: #1f2b3a;
+  color: var(--app-text-strong);
   display: grid;
   gap: 11px;
   padding: 12px;
@@ -1413,16 +1552,16 @@ dd {
 }
 
 .profileItem:hover {
-  background: #fbfcfe;
+  background: var(--surface-soft);
 }
 
 .profileItem:active {
-  border-color: #a8b6c8;
+  border-color: var(--border-strong);
 }
 
 .profileItem.active {
-  background: #fbfdff;
-  border-color: #c9d8f5;
+  background: var(--primary-soft-3);
+  border-color: var(--primary-soft-border-3);
 }
 
 .profileItemHeader,
@@ -1436,13 +1575,13 @@ dd {
 
 .profileEditorHeader {
   align-items: center;
-  border-bottom: 1px solid #e4eaf3;
+  border-bottom: 1px solid var(--border-soft);
   padding-bottom: 9px;
 }
 
 .profileEditorTitle {
   align-items: center;
-  color: #5e6d7e;
+  color: var(--app-muted-2);
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -1468,7 +1607,7 @@ dd {
 }
 
 .profileSelectArea span {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
@@ -1477,7 +1616,7 @@ dd {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: #a53b3b;
+  color: var(--danger-action);
   cursor: pointer;
   flex: 0 0 auto;
   font-size: 12px;
@@ -1487,9 +1626,9 @@ dd {
 }
 
 .profileDelete:hover {
-  background: #fff1f1;
-  border-color: #ffd0d0;
-  color: #bd3434;
+  background: var(--danger-action-bg);
+  border-color: var(--danger-action-border);
+  color: var(--danger-action-hover);
 }
 
 .profileFormGrid {
@@ -1505,10 +1644,10 @@ dd {
 
 .addProfile {
   align-items: center;
-  background: #f8fafc;
-  border: 1px dashed #b8c4d4;
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border-strong);
   border-radius: 999px;
-  color: #2563eb;
+  color: var(--primary);
   cursor: pointer;
   display: inline-flex;
   height: 38px;
@@ -1517,8 +1656,8 @@ dd {
 }
 
 .addProfile:hover {
-  background: #eef4ff;
-  border-color: #8faaf1;
+  background: var(--primary-soft-2);
+  border-color: var(--primary-soft-border-2);
 }
 
 .profilePanel,
@@ -1528,8 +1667,8 @@ dd {
 }
 
 .officialBox {
-  background: #f7f9fc;
-  border: 1px solid #e2e7ee;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: grid;
   gap: 5px;
@@ -1538,18 +1677,18 @@ dd {
 }
 
 .officialBox strong {
-  color: #1f2b3a;
+  color: var(--app-text-strong);
   font-size: 13px;
 }
 
 .officialBox span {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
 }
 
 .formHint {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
   margin: -5px 0 14px;
@@ -1581,8 +1720,8 @@ dd {
 
 .switchRow {
   align-items: center;
-  background: #ffffff;
-  border: 1px solid #e0e6ef;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   cursor: pointer;
   display: grid;
@@ -1593,8 +1732,8 @@ dd {
 }
 
 .switchRow:hover {
-  background: #f8fbff;
-  border-color: #c9d9f6;
+  background: var(--primary-soft-hover);
+  border-color: var(--primary-soft-border);
 }
 
 .switchRow.disabled {
@@ -1608,27 +1747,27 @@ dd {
 }
 
 .switchText strong {
-  color: #1f2b3a;
+  color: var(--app-text-strong);
   font-size: 13px;
 }
 
 .switchText span {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .switchRow input[type="checkbox"] {
-  accent-color: #2563eb;
+  accent-color: var(--primary);
   height: 18px;
   width: 18px;
 }
 
 .subtleMessage {
-  background: #f8fafc;
-  border: 1px solid #e1e7f0;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
-  color: #526071;
+  color: var(--app-muted);
   margin: 0;
   padding: 9px 10px;
 }
@@ -1640,7 +1779,7 @@ dd {
 
 .checkRow {
   align-items: start;
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: grid;
   gap: 12px;
@@ -1655,7 +1794,7 @@ dd {
 }
 
 .checkRow p {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -1678,19 +1817,19 @@ dd {
 }
 
 .pill.ok {
-  background: #e6f6ee;
-  color: #116b3b;
+  background: var(--ok-bg);
+  color: var(--ok-text);
 }
 
 .pill.warning,
 .pill.missing {
-  background: #fff3d8;
-  color: #8a5a00;
+  background: var(--warning-bg-2);
+  color: var(--warning-text);
 }
 
 .pill.pending {
-  background: #eef1f5;
-  color: #526071;
+  background: var(--surface-control);
+  color: var(--app-muted);
 }
 
 @media (max-width: 760px) {
@@ -1699,7 +1838,7 @@ dd {
   }
 
   .sidebar {
-    border-bottom: 1px solid #d7dde5;
+    border-bottom: 1px solid var(--border);
     border-right: 0;
   }
 

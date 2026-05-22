@@ -11,10 +11,12 @@ import {
   History,
   Trash2,
   LogIn,
+  Moon,
   Play,
   RefreshCw,
   Settings,
   Stethoscope,
+  Sun,
   Terminal,
   Eye,
   EyeOff,
@@ -73,6 +75,9 @@ type ProviderProfile = {
 type RunMode = "official" | "hybridApi" | "api";
 type ProviderProfileMode = "hybridApi" | "api";
 type UpstreamProtocol = "responses" | "chatCompletions" | "anthropicMessages";
+type Theme = "light" | "dark";
+
+const THEME_STORAGE_KEY = "codex-pilot-theme";
 
 type ProviderProfileSaveResponse = {
   id: string;
@@ -165,6 +170,7 @@ function backendStatusLabel(status: BackendStatus | null): string {
 
 function App() {
   const [activeView, setActiveView] = React.useState<ViewId>("overview");
+  const [theme, setTheme] = React.useState<Theme>(() => loadInitialTheme());
   const [status, setStatus] = React.useState<BackendStatus | null>(null);
   const [appVersion, setAppVersion] = React.useState<string | null>(null);
   const [launch, setLaunch] = React.useState<LaunchSnapshot | null>(null);
@@ -187,6 +193,12 @@ function App() {
     const timer = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  React.useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.classList.toggle("light", theme === "light");
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
 
   const refresh = React.useCallback((silent = false) => {
     if (!silent) notify("正在刷新");
@@ -307,7 +319,7 @@ function App() {
   };
 
   return (
-    <main className="shell">
+    <main className={`shell ${theme}`}>
       <aside className="sidebar">
         <div className="brand">
           <Bot size={20} />
@@ -338,6 +350,14 @@ function App() {
           </div>
           <div className="headerActions">
             <span className="message">{message}</span>
+            <button
+              className="secondary iconButton"
+              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+              title={theme === "dark" ? "切换到浅色模式" : "切换到夜晚模式"}
+              type="button"
+            >
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
             <button className="secondary iconButton" onClick={() => refresh()} title="刷新" type="button">
               <RefreshCw size={16} />
             </button>
@@ -1725,6 +1745,11 @@ function schemaLabel(schema: string) {
   if (schema === "codex_threads") return "Codex 对话";
   if (schema === "generic_sessions") return "旧版会话";
   return schema || "未知";
+}
+
+function loadInitialTheme(): Theme {
+  if (typeof window === "undefined") return "light";
+  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
 }
 
 function providerSyncSummary(snapshot: ProviderSyncSnapshot) {
