@@ -1,5 +1,10 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
+
+#[cfg(test)]
+static TEST_APP_STATE_DIR: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
 pub fn codex_home_dir() -> PathBuf {
     directories::BaseDirs::new()
@@ -20,6 +25,14 @@ pub fn codex_state_db_path() -> PathBuf {
 }
 
 pub fn app_state_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(path) = TEST_APP_STATE_DIR
+        .get()
+        .and_then(|slot| slot.lock().ok().and_then(|value| value.clone()))
+    {
+        return path;
+    }
+
     if cfg!(windows) {
         if let Some(app_data) = std::env::var_os("APPDATA") {
             return PathBuf::from(app_data).join("CodexPilot");
@@ -31,6 +44,14 @@ pub fn app_state_dir() -> PathBuf {
         .or_else(|| directories::BaseDirs::new().map(|dirs| dirs.home_dir().join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"))
         .join("CodexPilot")
+}
+
+#[cfg(test)]
+pub fn set_test_app_state_dir(path: Option<PathBuf>) {
+    let slot = TEST_APP_STATE_DIR.get_or_init(|| Mutex::new(None));
+    if let Ok(mut value) = slot.lock() {
+        *value = path;
+    }
 }
 
 pub fn resolve_codex_app_dir(app_dir: Option<&Path>) -> Option<PathBuf> {

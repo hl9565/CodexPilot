@@ -15,6 +15,12 @@ impl HelperRuntime {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HelperProxyRoute {
+    Responses { stream: bool },
+    Models,
+}
+
 pub async fn start_helper(port: u16) -> anyhow::Result<HelperRuntime> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .await
@@ -73,7 +79,7 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> anyhow::Result<
                 "transport": "http-helper"
             }))?,
         )
-    } else if crate::protocol_proxy::is_responses_proxy_path(path) && method == "POST" {
+    } else if let Some(route) = helper_proxy_route(method, path, request_body) {
         let target = match load_active_proxy_target() {
             Ok(Some(target)) => target,
             Ok(None) => {
@@ -103,8 +109,8 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> anyhow::Result<
                 return Ok(());
             }
         };
-        if target.protocol == crate::protocol_proxy::UpstreamProtocol::ChatCompletions
-            && crate::protocol_proxy::responses_request_wants_stream(request_body)
+        if matches!(route, HelperProxyRoute::Responses { stream: true })
+            && target.protocol == crate::protocol_proxy::UpstreamProtocol::ChatCompletions
         {
             if let Err(error) = crate::protocol_proxy::stream_chat_completions_as_responses(
                 &mut stream,
@@ -125,34 +131,16 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> anyhow::Result<
             }
             return Ok(());
         }
-        match crate::protocol_proxy::handle_responses_proxy_request(&target, request_body).await {
-            Ok(result) => (result.status, result.content_type, result.body),
-            Err(error) => (
-                "502 Bad Gateway".to_string(),
-                "application/json; charset=utf-8".to_string(),
-                serde_json::to_vec(&json!({
-                    "status": "failed",
-                    "message": error.to_string()
-                }))?,
-            ),
-        }
-    } else if crate::protocol_proxy::is_models_proxy_path(path) && method == "GET" {
-        let target = match load_active_proxy_target() {
-            Ok(Some(target)) => target,
-            Ok(None) => {
-                write_json_response(
-                    &mut stream,
-                    "502 Bad Gateway",
-                    &json!({
-                        "status": "failed",
-                        "message": "当前激活配置未启用本地协议代理。"
-                    }),
-                )
-                .await?;
-                stream.shutdown().await?;
-                return Ok(());
-            }
-            Err(error) => {
+        if matches!(route, HelperProxyRoute::Responses { stream: true })
+            && target.protocol == crate::protocol_proxy::UpstreamProtocol::AnthropicMessages
+        {
+            if let Err(error) = crate::protocol_proxy::stream_anthropic_messages_as_responses(
+                &mut stream,
+                &target,
+                request_body,
+            )
+            .await
+            {
                 write_json_response(
                     &mut stream,
                     "502 Bad Gateway",
@@ -162,20 +150,38 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> anyhow::Result<
                     }),
                 )
                 .await?;
-                stream.shutdown().await?;
-                return Ok(());
             }
-        };
-        match crate::protocol_proxy::handle_models_proxy_request(&target).await {
-            Ok(result) => (result.status, result.content_type, result.body),
-            Err(error) => (
-                "502 Bad Gateway".to_string(),
-                "application/json; charset=utf-8".to_string(),
-                serde_json::to_vec(&json!({
-                    "status": "failed",
-                    "message": error.to_string()
-                }))?,
-            ),
+            return Ok(());
+        }
+        match route {
+            HelperProxyRoute::Responses { .. } => {
+                match crate::protocol_proxy::handle_responses_proxy_request(&target, request_body)
+                    .await
+                {
+                    Ok(result) => (result.status, result.content_type, result.body),
+                    Err(error) => (
+                        "502 Bad Gateway".to_string(),
+                        "application/json; charset=utf-8".to_string(),
+                        serde_json::to_vec(&json!({
+                            "status": "failed",
+                            "message": error.to_string()
+                        }))?,
+                    ),
+                }
+            }
+            HelperProxyRoute::Models => {
+                match crate::protocol_proxy::handle_models_proxy_request(&target).await {
+                    Ok(result) => (result.status, result.content_type, result.body),
+                    Err(error) => (
+                        "502 Bad Gateway".to_string(),
+                        "application/json; charset=utf-8".to_string(),
+                        serde_json::to_vec(&json!({
+                            "status": "failed",
+                            "message": error.to_string()
+                        }))?,
+                    ),
+                }
+            }
         }
     } else {
         (
@@ -197,6 +203,18 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> anyhow::Result<
     stream.write_all(&body).await?;
     stream.shutdown().await?;
     Ok(())
+}
+
+fn helper_proxy_route(method: &str, path: &str, body: &str) -> Option<HelperProxyRoute> {
+    if method == "POST" && crate::protocol_proxy::is_responses_proxy_path(path) {
+        return Some(HelperProxyRoute::Responses {
+            stream: crate::protocol_proxy::responses_request_wants_stream(body),
+        });
+    }
+    if method == "GET" && crate::protocol_proxy::is_models_proxy_path(path) {
+        return Some(HelperProxyRoute::Models);
+    }
+    None
 }
 
 async fn write_json_response(
@@ -271,4 +289,130 @@ fn load_active_proxy_target() -> anyhow::Result<Option<crate::protocol_proxy::Ac
         api_key,
         protocol,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+    use crate::protocol_proxy::{RouteMode, UpstreamProtocol};
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        static COUNTER: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        std::env::temp_dir().join(format!(
+            "codex-pilot-helper-{name}-{}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ))
+    }
+
+    fn write_provider_profiles(
+        root: &std::path::Path,
+        base_url: &str,
+        protocol: &str,
+    ) -> anyhow::Result<()> {
+        let state = json!({
+            "activeProfileId": "p1",
+            "profiles": [{
+                "id": "p1",
+                "name": "test",
+                "baseUrl": base_url,
+                "bearerToken": "sk-test",
+                "mode": "api",
+                "upstreamProtocol": protocol
+            }]
+        });
+        std::fs::create_dir_all(root)?;
+        std::fs::write(
+            root.join("provider-profiles.json"),
+            serde_json::to_vec_pretty(&state)?,
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn helper_identifies_responses_and_models_routes() {
+        let _guard = test_guard();
+        assert_eq!(
+            helper_proxy_route("POST", "/v1/responses", r#"{"stream":true}"#),
+            Some(HelperProxyRoute::Responses { stream: true })
+        );
+        assert_eq!(
+            helper_proxy_route("POST", "/responses/compact", r#"{"stream":false}"#),
+            Some(HelperProxyRoute::Responses { stream: false })
+        );
+        assert_eq!(
+            helper_proxy_route("GET", "/v1/models", ""),
+            Some(HelperProxyRoute::Models)
+        );
+        assert_eq!(helper_proxy_route("POST", "/backend/status", ""), None);
+    }
+
+    #[test]
+    fn helper_loads_chat_proxy_target_from_profiles() {
+        let _guard = test_guard();
+        let root = unique_temp_dir("chat-target");
+        crate::app_paths::set_test_app_state_dir(Some(root.clone()));
+        write_provider_profiles(&root, "https://chat.example/v1", "chatCompletions").unwrap();
+
+        let target = load_active_proxy_target().unwrap().unwrap();
+        assert_eq!(target.base_url, "https://chat.example/v1");
+        assert_eq!(target.api_key, "sk-test");
+        assert_eq!(target.protocol, UpstreamProtocol::ChatCompletions);
+        assert_eq!(
+            crate::protocol_proxy::route_mode_for_protocol(target.protocol),
+            RouteMode::LocalProxy
+        );
+
+        crate::app_paths::set_test_app_state_dir(None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn helper_loads_anthropic_proxy_target_from_profiles() {
+        let _guard = test_guard();
+        let root = unique_temp_dir("anthropic-target");
+        crate::app_paths::set_test_app_state_dir(Some(root.clone()));
+        write_provider_profiles(&root, "https://anthropic.example/v1", "anthropicMessages")
+            .unwrap();
+
+        let target = load_active_proxy_target().unwrap().unwrap();
+        assert_eq!(target.base_url, "https://anthropic.example/v1");
+        assert_eq!(target.protocol, UpstreamProtocol::AnthropicMessages);
+        assert_eq!(
+            crate::protocol_proxy::route_mode_for_protocol(target.protocol),
+            RouteMode::LocalProxy
+        );
+
+        crate::app_paths::set_test_app_state_dir(None);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn helper_ignores_direct_responses_profiles() {
+        let _guard = test_guard();
+        let root = unique_temp_dir("direct-target");
+        crate::app_paths::set_test_app_state_dir(Some(root.clone()));
+        write_provider_profiles(&root, "https://responses.example/v1", "responses").unwrap();
+
+        assert!(load_active_proxy_target().unwrap().is_none());
+
+        crate::app_paths::set_test_app_state_dir(None);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

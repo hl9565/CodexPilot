@@ -49,7 +49,7 @@ Hybrid Relay is for users who have already completed the official Codex/ChatGPT 
 
 ![CodexPilot model channel page](images/readme-provider.png)
 
-Base URL and API Key come from a third-party or self-hosted API endpoint. In the first protocol-expansion release, CodexPilot supports upstreams that already speak Responses API and upstreams that only speak Chat Completions. The official login state keeps Codex/ChatGPT login compatibility and the cross-device control experience; once Hybrid Relay is enabled, model requests are sent to the custom Provider you configured, and that Provider's privacy, billing, and data handling policies apply.
+Base URL and API Key come from a third-party or self-hosted API endpoint. In the current protocol-expansion release, CodexPilot supports upstreams that already speak Responses API, upstreams that only speak Chat Completions, and backend-only Anthropic Messages adapters through the same local helper path. The official login state keeps Codex/ChatGPT login compatibility and the cross-device control experience; once Hybrid Relay is enabled, model requests are sent to the custom Provider you configured, and that Provider's privacy, billing, and data handling policies apply.
 
 Setup steps:
 
@@ -84,7 +84,7 @@ In the current release, the same upstream protocol choices apply:
 - Responses API
 - Chat Completions
 
-When the selected upstream only supports Chat Completions, CodexPilot writes a local Responses endpoint into Codex config and performs protocol conversion through its local helper service.
+When the selected upstream only supports Chat Completions, CodexPilot writes a local Responses endpoint into Codex config and performs protocol conversion through its local helper service. The backend protocol layer is also ready for Anthropic Messages profiles stored or migrated outside the current UI, but that option is still intentionally hidden in the first-version manager surface.
 
 ### Official Channel
 

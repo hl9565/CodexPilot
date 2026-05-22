@@ -740,6 +740,7 @@ fn now_ms() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn reads_active_relay_provider_config() {
@@ -972,12 +973,15 @@ base_url = "http://127.0.0.1:8000"
     }
 
     fn unique_temp_dir() -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         std::env::temp_dir().join(format!(
-            "codex-pilot-relay-config-test-{}",
+            "codex-pilot-relay-config-test-{}-{}-{}",
+            std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos()
+                .as_nanos(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
         ))
     }
 }

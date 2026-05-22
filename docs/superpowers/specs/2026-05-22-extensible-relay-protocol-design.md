@@ -41,7 +41,6 @@ real product need, not accidental complexity, but it should be framed as
 
 ## Non-Goals
 
-- Do not implement `Anthropic Messages` conversion in this change.
 - Do not change Codex's external wire protocol away from `Responses API`.
 - Do not add multimodal parity for every protocol family. First-version support
   focuses on text, streaming SSE, tool calls, reasoning, and `/v1/models`.
@@ -226,16 +225,18 @@ When the active profile uses `upstreamProtocol = chatCompletions`:
   - Chat Completions response -> Responses response
   - Chat Completions SSE -> Responses SSE
 
-### Anthropic Messages Placeholder
+### Anthropic Messages Upstream
 
 When a stored profile has `upstreamProtocol = anthropicMessages`:
 
-- save is allowed only through backend compatibility or future migration paths;
-- apply must fail fast with a clear unsupported-protocol error;
-- Codex config must not be modified on that failed apply.
-
-This preserves the extensible schema without pretending the protocol already
-works.
+- `RouteMode = localProxy`
+- `model_providers.CodexPilot.base_url` points to the local helper endpoint
+- Codex still sees `wire_api = "responses"`
+- the real upstream Base URL and key remain in CodexPilot-owned settings
+- the helper converts:
+  - Responses request -> Anthropic Messages request
+  - Anthropic Messages response -> Responses response
+  - Anthropic Messages SSE -> Responses SSE
 
 ## Helper Routing
 
@@ -267,7 +268,7 @@ Suggested file boundaries:
 - `protocol_proxy/mod.rs`
 - `protocol_proxy/adapters/responses.rs`
 - `protocol_proxy/adapters/chat_completions.rs`
-- optional placeholder `protocol_proxy/adapters/anthropic_messages.rs`
+- `protocol_proxy/adapters/anthropic_messages.rs`
 
 Exact filenames may vary, but the semantic split should remain.
 
@@ -297,8 +298,9 @@ The first two implementations:
    - reuses the proven conversion approach from CodexPlusPlus, but inside the
      generic adapter architecture rather than as the architecture itself
 
-The `AnthropicMessagesAdapter` may exist only as an erroring stub in this
-change.
+3. `AnthropicMessagesAdapter`
+   - performs real protocol translation for the first-version text/tool scope
+   - keeps the same Codex-facing Responses contract as the other adapters
 
 ## Chat Completions Support Scope
 
@@ -353,7 +355,7 @@ API-backed channels (`混合中转` and `无账号`) show:
 - `Responses API`
 - `Chat Completions`
 
-`Anthropic Messages` is not shown yet.
+`Anthropic Messages` is not shown yet, even though backend support exists.
 
 ### Validation
 
@@ -361,8 +363,6 @@ API-backed channels (`混合中转` and `无账号`) show:
 - Base URL required for API-backed channels
 - API Key required for API-backed channels
 - profile names unique after trimming
-- unsupported protocol apply attempts blocked before modifying Codex config
-
 ### Save Behavior
 
 #### 官方通道
@@ -428,7 +428,6 @@ Diagnostics must not record:
 
 Error behavior:
 
-- unsupported protocol: fail before writing Codex config when applying
 - malformed upstream response: return `502 Bad Gateway`
 - upstream non-2xx: preserve status code and body when safe
 - stream conversion failure: emit a Responses failure event and close cleanly
@@ -448,12 +447,15 @@ Automated coverage should include:
 - duplicate profile name rejection
 - relay config writer direct Responses path
 - relay config writer local-proxy path for Chat Completions
-- unsupported `anthropicMessages` apply failure without config mutation
 - helper route detection for `/responses`, `/responses/compact`, and `/models`
+- helper active-profile loading for `chatCompletions` and `anthropicMessages`
 - Responses direct adapter pass-through
 - Chat Completions request conversion
 - Chat Completions response conversion
 - Chat Completions SSE conversion
+- Anthropic Messages request conversion
+- Anthropic Messages response conversion
+- Anthropic Messages SSE conversion
 - `/v1/models` proxying
 - manager save flow for `官方通道`
 - manager save flow for `混合中转`
@@ -479,8 +481,7 @@ Manual verification should check:
 - Manager UI exposes `Responses API` and `Chat Completions` as the selectable
   upstream protocols for API-backed channels.
 - Duplicate profile names are rejected.
-- `Anthropic Messages` is represented in backend schema but not exposed in the
-  first-version UI.
-- Applying an unsupported protocol fails without rewriting Codex config.
+- `Anthropic Messages` is supported in backend relay/config/helper paths while
+  remaining hidden in the first-version UI.
 - Existing provider sync behavior remains manual and unchanged.
 - Code, tests, and user-facing docs are updated together.

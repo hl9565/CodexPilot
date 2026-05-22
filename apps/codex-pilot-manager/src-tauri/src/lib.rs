@@ -489,9 +489,6 @@ async fn apply_provider(request: ProviderApplyRequest) -> Result<String, String>
     let bearer_token = profile.bearer_token;
     let mode = request.mode.unwrap_or(profile.mode);
     let upstream_protocol = profile.upstream_protocol;
-    if upstream_protocol == codex_pilot_core::protocol_proxy::UpstreamProtocol::AnthropicMessages {
-        return Err("Anthropic Messages 适配尚未实现，当前不能应用该配置。".to_string());
-    }
     tauri::async_runtime::spawn_blocking(move || {
         let result = match mode {
             ProviderProfileMode::HybridApi => {
