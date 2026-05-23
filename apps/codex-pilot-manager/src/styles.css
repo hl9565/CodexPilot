@@ -36,6 +36,12 @@
   --primary-strong: #17408f;
   --primary-link: #2459c5;
   --primary-icon: #1f56c5;
+  --primary-accent-start: #2f6df6;
+  --primary-accent-end: #17408f;
+  --primary-shadow-soft: rgba(23, 64, 143, 0.08);
+  --primary-shadow-inset: rgba(44, 102, 235, 0.18);
+  --primary-editing-border: #94b5f6;
+  --primary-editing-inset: rgba(59, 130, 246, 0.12);
   --danger-bg: #fff5f5;
   --danger-hover: #ffecec;
   --danger-active: #ffe1e1;
@@ -112,6 +118,12 @@
   --primary-strong: #bfdbfe;
   --primary-link: #93c5fd;
   --primary-icon: #93c5fd;
+  --primary-accent-start: #60a5fa;
+  --primary-accent-end: #bfdbfe;
+  --primary-shadow-soft: rgba(0, 0, 0, 0.2);
+  --primary-shadow-inset: rgba(147, 197, 253, 0.22);
+  --primary-editing-border: #4f7fbd;
+  --primary-editing-inset: rgba(147, 197, 253, 0.14);
   --danger-bg: #35191d;
   --danger-hover: #431d23;
   --danger-active: #4d2028;
@@ -1554,8 +1566,8 @@ dd {
 
 .ccsImportRow {
   align-items: center;
-  background: #f7f9fc;
-  border: 1px solid #e2e7ee;
+  background: var(--surface-hover);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: flex;
   gap: 12px;
@@ -1570,12 +1582,12 @@ dd {
 }
 
 .ccsImportMeta strong {
-  color: #1f2b3a;
+  color: var(--app-text-heading);
   font-size: 13px;
 }
 
 .ccsImportMeta span {
-  color: #637183;
+  color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -1619,12 +1631,12 @@ dd {
   background: linear-gradient(180deg, var(--primary-soft) 0%, var(--primary-soft-2) 100%);
   border-color: var(--primary-soft-border);
   box-shadow:
-    0 8px 20px rgba(23, 64, 143, 0.08),
-    inset 0 0 0 1px rgba(44, 102, 235, 0.18);
+    0 8px 20px var(--primary-shadow-soft),
+    inset 0 0 0 1px var(--primary-shadow-inset);
 }
 
 .profileItem.active::before {
-  background: linear-gradient(180deg, #2f6df6 0%, #17408f 100%);
+  background: linear-gradient(180deg, var(--primary-accent-start) 0%, var(--primary-accent-end) 100%);
   border-radius: 0 999px 999px 0;
   content: "";
   inset: 10px auto 10px 0;
@@ -1633,8 +1645,8 @@ dd {
 }
 
 .profileItem.editing {
-  border-color: #94b5f6;
-  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.12);
+  border-color: var(--primary-editing-border);
+  box-shadow: inset 0 0 0 1px var(--primary-editing-inset);
 }
 
 .profileItemHeader,
@@ -1714,9 +1726,9 @@ dd {
 }
 
 .profileDelete.dangerActive {
-  background: #fff1f1;
-  border-color: #ffb4b4;
-  color: #bd3434;
+  background: var(--danger-action-bg);
+  border-color: var(--danger-border-hover);
+  color: var(--danger-action-hover);
 }
 
 .profileFormGrid {

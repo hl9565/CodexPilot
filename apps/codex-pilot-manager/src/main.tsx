@@ -41,6 +41,7 @@ type LaunchSnapshot = {
   autoLaunchOnOpen: boolean;
   autoSyncSessionsOnLaunch: boolean;
   ready: boolean;
+  codexInstalled: boolean;
   state: string;
   actionKind: string;
   actionLabel: string;
@@ -201,6 +202,7 @@ function App() {
   const [progressMessage, setProgressMessage] = React.useState("");
   const [launching, setLaunching] = React.useState(false);
   const autoLaunchAttemptedRef = React.useRef(false);
+  const autoLaunchFailedRef = React.useRef(false);
 
   const notify = React.useCallback((value: string) => {
     setMessage(value);
@@ -275,7 +277,9 @@ function App() {
       actionKind: launch.actionKind,
       autoLaunchOnOpen: launch.autoLaunchOnOpen,
       alreadyAttempted: autoLaunchAttemptedRef.current,
+      alreadyFailed: autoLaunchFailedRef.current,
       launching,
+      codexInstalled: launch.codexInstalled,
     });
     if (action.kind === "skip") return;
     if (action.markAttempted) {
@@ -293,7 +297,10 @@ function App() {
         notify(value);
         refresh(true);
       })
-      .catch((error) => notify(String(error)))
+      .catch((error) => {
+        autoLaunchFailedRef.current = true;
+        notify(String(error));
+      })
       .finally(() => {
         setLaunching(false);
         setProgressMessage("");
@@ -1733,6 +1740,7 @@ function DiagnosticsView({
   const [logMessage, setLogMessage] = React.useState("");
   const logs = diagnostics?.logs ?? [];
   const logText = logs.length ? logs.join("\n") : "";
+  const logLines = React.useMemo(() => logs.map(formatDiagnosticLogLine), [logs]);
 
   const collectDiagnostics = () => {
     setLogMessage("正在生成诊断快照");
@@ -1815,11 +1823,45 @@ function DiagnosticsView({
       </div>
       {logMessage && <p className="formMessage logMessage">{logMessage}</p>}
       <pre className="logBlock">
-        {logText || "暂无日志"}
+        {logLines.length ? logLines.join("\n") : "暂无日志"}
       </pre>
     </section>
     </div>
   );
+}
+
+function formatDiagnosticLogLine(line: string): string {
+  const text = String(line || "");
+  try {
+    const parsed = JSON.parse(text) as { ts?: number | string };
+    const prefix = formatDiagnosticTimestamp(parsed?.ts);
+    return prefix ? `${prefix} ${text}` : text;
+  } catch (_error) {
+    return text;
+  }
+}
+
+function formatDiagnosticTimestamp(value: unknown): string {
+  const raw = typeof value === "string" || typeof value === "number" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(raw) || raw <= 0) return "";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part: number, size = 2) => String(part).padStart(size, "0");
+  return [
+    date.getFullYear(),
+    "-",
+    pad(date.getMonth() + 1),
+    "-",
+    pad(date.getDate()),
+    " ",
+    pad(date.getHours()),
+    ":",
+    pad(date.getMinutes()),
+    ":",
+    pad(date.getSeconds()),
+    ".",
+    pad(date.getMilliseconds(), 3),
+  ].join("");
 }
 
 function Distribution({ title, items }: { title: string; items: ProviderCount[] }) {

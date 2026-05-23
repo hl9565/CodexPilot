@@ -651,58 +651,12 @@
     return Boolean(sessionId && currentSessionKey() === sessionId);
   }
 
-  function safeCodexHomeUrl() {
+  function reloadAfterCurrentSessionDelete() {
     try {
-      const current = new URL(window.location.href);
-      if (current.pathname.includes("/codex")) {
-        current.pathname = "/codex";
-        current.search = "";
-        current.hash = "";
-        return current.toString();
-      }
-      return current.origin || "/";
+      window.location.reload();
     } catch (_error) {
-      return "/";
+      window.location.href = String(window.location.href || "");
     }
-  }
-
-  function leaveDeletedCurrentSession(deletedSessionId) {
-    const nextRow = sessionRows()
-      .find((candidate) => candidate.getAttribute("data-app-action-sidebar-thread-id") !== deletedSessionId);
-    if (nextRow) {
-      try {
-        nextRow.click();
-        return;
-      } catch (_error) {
-        // Fall through to a route reset if the host row cannot be clicked.
-      }
-    }
-    window.location.href = safeCodexHomeUrl();
-  }
-
-  function waitForCurrentSessionToChange(deletedSessionId, attempt = 0) {
-    const routeSessionId = sessionRefFromUrl()?.session_id || "";
-    const href = String(window.location.href || "");
-    if (!deletedSessionId || (routeSessionId !== deletedSessionId && !href.includes(deletedSessionId))) {
-      return Promise.resolve(true);
-    }
-    if (attempt >= 12) {
-      return Promise.resolve(false);
-    }
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        waitForCurrentSessionToChange(deletedSessionId, attempt + 1).then(resolve);
-      }, 80 + attempt * 40);
-    });
-  }
-
-  async function leaveCurrentSessionBeforeDelete(session) {
-    const deletedSessionId = String(session?.session_id || "").trim();
-    if (!deletedSessionId || !isCurrentSession(session)) {
-      return true;
-    }
-    leaveDeletedCurrentSession(deletedSessionId);
-    return waitForCurrentSessionToChange(deletedSessionId);
   }
 
   function stopRowActionEvent(event) {
@@ -804,19 +758,20 @@
 
   async function deleteSession(session, row, notify = showToast) {
     const title = session.title || session.session_id;
+    reportRendererEvent("delete_attempt", {
+      requestedSessionId: session.session_id,
+      currentSessionKey: currentSessionKey(),
+      detectedSessionId: detectCurrentSession()?.session_id || "",
+      rowSessionId: row?.getAttribute?.("data-app-action-sidebar-thread-id") || "",
+      title,
+      href: String(window.location.href || "")
+    });
     if (!window.confirm(`确认删除“${title}”？删除前会创建可撤销备份。`)) {
       return false;
     }
     const deletingCurrentSession = isCurrentSession(session);
-    if (deletingCurrentSession && !window.confirm("你正在删除当前打开的会话。删除后会自动切换到其他会话或返回 Codex 首页，确认继续？")) {
+    if (deletingCurrentSession && !window.confirm("你正在删除当前打开的会话。删除成功后会刷新页面，确认继续？")) {
       return false;
-    }
-    if (deletingCurrentSession) {
-      const leftCurrentSession = await leaveCurrentSessionBeforeDelete(session);
-      if (!leftCurrentSession) {
-        notify("删除失败：请先切换到其他对话或 Codex 首页后再删除当前会话", null);
-        return false;
-      }
     }
     const response = await window.__CODEX_PILOT__.deleteSession(sessionPayload(session));
     const result = response.result || response;
@@ -832,6 +787,9 @@
       syncDeletedSessionRow(session);
     }
     notify(result.message || "已删除会话", lastUndoToken);
+    if (deletingCurrentSession) {
+      setTimeout(() => reloadAfterCurrentSessionDelete(), 120);
+    }
     return true;
   }
 
@@ -986,17 +944,9 @@
         }
       }
       const currentEntry = resolved.find(({ session }) => isCurrentSession(session));
-      if (currentEntry && !window.confirm("删除列表包含当前打开的会话。删除后会自动切换到其他会话或返回 Codex 首页，确认继续？")) return;
+      if (currentEntry && !window.confirm("删除列表包含当前打开的会话。删除成功后会刷新页面，确认继续？")) return;
       let deleted = 0;
       for (const { row, session } of resolved) {
-        const deletingCurrentSession = isCurrentSession(session);
-        if (deletingCurrentSession) {
-          const leftCurrentSession = await leaveCurrentSessionBeforeDelete(session);
-          if (!leftCurrentSession) {
-            showToast("删除失败：请先切换到其他对话或 Codex 首页后再删除当前会话", null);
-            continue;
-          }
-        }
         const response = await window.__CODEX_PILOT__.deleteSession(sessionPayload(session));
         const result = response.result || response;
         if (response.status === "ok" && result.status !== "failed" && result.status !== "not_found") {
@@ -1005,6 +955,9 @@
         }
       }
       showToast(`已删除 ${deleted} 个归档会话`, null);
+      if (currentEntry && deleted > 0) {
+        setTimeout(() => reloadAfterCurrentSessionDelete(), 120);
+      }
     }, true);
     const heading = Array.from(document.querySelectorAll("h1, h2, h3"))
       .find((element) => ["已归档对话", "Archived conversations"].includes(normalizeText(element.textContent)));

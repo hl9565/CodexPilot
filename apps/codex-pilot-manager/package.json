@@ -1,12 +1,12 @@
 {
   "name": "codex-pilot-manager",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "check": "tsc --noEmit -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json && node ../../scripts/check-manager-theme-colors.mjs",
     "test": "tsc src/autoLaunch.ts src/autoLaunch.test.ts --module NodeNext --moduleResolution NodeNext --target ES2020 --outDir ../../target/manager-tests --skipLibCheck && node ../../target/manager-tests/autoLaunch.test.js",
     "tauri": "tauri",
     "vite:dev": "vite --host 127.0.0.1 --port 1420",

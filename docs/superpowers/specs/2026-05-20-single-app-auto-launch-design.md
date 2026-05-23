@@ -32,11 +32,19 @@ preferences as app path and ports.
 When the switch is off, opening CodexPilot only refreshes status. Users launch,
 reinject, restart, and save preferences from the manager UI.
 
-When the switch is on, opening CodexPilot silently starts Codex only when Codex
-is not already running. If Codex is already open, even with a reachable debug
-port, the manager skips automatic injection and opens the management UI. Users
-can then choose the explicit manual reinject action. Startup failures remain
-visible through the normal message and launch status surfaces.
+When the switch is on, opening CodexPilot first checks whether a usable Codex
+installation path can be resolved. If not, the manager stays visible and does
+nothing automatically. If Codex is installed, the manager then checks runtime
+state and chooses one conservative automatic action:
+
+- Codex not running: automatically start Codex once.
+- Codex already running with a reachable debug port: automatically inject once.
+- Codex already running without a reachable debug port: do not restart
+  automatically; keep the manager visible and require manual confirmation for
+  restart.
+
+If an automatic launch or injection attempt fails once, the current manager
+process must not automatically retry again.
 
 ## Architecture
 
@@ -49,9 +57,10 @@ startup, it loads preferences and exposes the current launch snapshot. The
 snapshot includes the auto-launch preference so the frontend can decide whether
 to trigger the existing backend launch command once.
 
-The frontend should not duplicate launch logic. It should call a backend command
-for explicit launch/reinject actions and for safe automatic launch. It must not
-call reinject or restart automatically when a Codex window is already running.
+The frontend should not duplicate launch logic. It should call backend commands
+for explicit launch/reinject actions and for one conservative automatic action
+chosen from the launch snapshot. It must not call restart automatically when a
+Codex window is already running without a reachable debug port.
 
 ## Startup Flow
 
@@ -60,15 +69,17 @@ call reinject or restart automatically when a Codex window is already running.
 3. Frontend receives `launch_snapshot`.
 4. If `autoLaunchOnOpen` is off, no automatic launch is attempted.
 5. If `autoLaunchOnOpen` is on, the frontend triggers at most one automatic
-   action per manager page load:
+   action per manager process:
+   - no usable Codex installation path: stop and show the manager.
    - helper already running: mark as running and do not spawn another launcher.
-   - debug port reachable: skip automatic injection and keep the manager UI
-     ready for a manual reinject.
-   - no Codex running: spawn the sidecar launcher.
-   - unrelated Codex already running: surface the current "restart required"
-     state instead of killing it automatically.
-6. Manual launch keeps handling all cases, including the confirmed restart path.
-7. On failure, the manager stays visible and shows the error.
+   - debug port reachable: automatically inject once.
+   - no Codex running: spawn the sidecar launcher once.
+   - unrelated Codex already running without debug port: surface the current
+     "restart required" state instead of killing it automatically.
+6. If the automatic action fails, record that failure in the running manager
+   process and do not automatically retry again.
+7. Manual launch keeps handling all cases, including the confirmed restart path.
+8. On failure, the manager stays visible and shows the error.
 
 ## Error Handling
 
@@ -102,9 +113,13 @@ No user-facing launcher app, shortcut, or second product name is added.
   is off.
 - Verify opening the manager launches Codex once when the switch is on and no
   Codex window is running.
-- Verify opening the manager does not automatically reinject when Codex is
-  already running with a reachable debug port.
+- Verify opening the manager automatically injects once when Codex is already
+  running with a reachable debug port.
 - Verify opening the manager does not restart an unrelated running Codex.
+- Verify opening the manager does not attempt automatic launch or injection when
+  no usable Codex installation path is available.
+- Verify one failed automatic launch or injection attempt is not retried again
+  during the same manager process lifetime.
 - Keep the frontend auto-launch decision in a small unit-tested module so these
   branches can be checked without spawning Codex.
 - Verify the existing manual launch button still works.

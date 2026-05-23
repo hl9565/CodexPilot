@@ -142,6 +142,56 @@ impl SQLiteStorageAdapter {
         }
     }
 
+    pub fn inspect_delete_local(&self, session: &SessionRef) -> anyhow::Result<Value> {
+        if !self.db_path.exists() {
+            return Ok(json!({
+                "db_path": self.db_path,
+                "db_exists": false,
+                "requested_id": session.id,
+                "normalized_id": session.normalized_id(),
+                "title": session.title,
+            }));
+        }
+
+        let db = Connection::open(&self.db_path)?;
+        let schema = schema_kind(&db)?;
+        let normalized_id = session.normalized_id();
+        let schema_name = match schema {
+            Some(SchemaKind::GenericSessions) => "generic_sessions",
+            Some(SchemaKind::CodexThreads) => "codex_threads",
+            None => "unknown",
+        };
+
+        let thread_exists = if schema == Some(SchemaKind::CodexThreads) {
+            select_rows(&db, "threads", "id = ?1", &[&normalized_id])?.len()
+        } else {
+            0
+        };
+        let session_exists = if schema == Some(SchemaKind::GenericSessions) {
+            select_rows(&db, "sessions", "id = ?1", &[&normalized_id])?.len()
+        } else {
+            0
+        };
+
+        let sample_ids = if schema == Some(SchemaKind::CodexThreads) {
+            sample_thread_ids(&db)?
+        } else {
+            Vec::new()
+        };
+
+        Ok(json!({
+            "db_path": self.db_path,
+            "db_exists": true,
+            "schema": schema_name,
+            "requested_id": session.id,
+            "normalized_id": normalized_id,
+            "title": session.title,
+            "thread_exists_count": thread_exists,
+            "session_exists_count": session_exists,
+            "sample_thread_ids": sample_ids,
+        }))
+    }
+
     pub fn undo(&self, token: &str) -> anyhow::Result<DeleteResult> {
         let backup_path = self.backup_path(token)?;
         let raw = fs::read_to_string(&backup_path)
@@ -632,6 +682,19 @@ impl SQLiteStorageAdapter {
             },
         }
     }
+}
+
+fn sample_thread_ids(db: &Connection) -> anyhow::Result<Vec<String>> {
+    if !has_table(db, "threads")? {
+        return Ok(Vec::new());
+    }
+    let mut stmt = db.prepare("SELECT id FROM threads ORDER BY updated_at_ms DESC, updated_at DESC, created_at_ms DESC LIMIT 8")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row?);
+    }
+    Ok(ids)
 }
 
 pub(crate) fn schema_kind(db: &Connection) -> anyhow::Result<Option<SchemaKind>> {

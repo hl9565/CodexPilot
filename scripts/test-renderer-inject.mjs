@@ -286,7 +286,13 @@ function createFixture({ backendStatusMode = "ok", includeOther = true, messages
       replaceState() {}
     },
     window: {
-      location: { href: "https://chatgpt.com/codex" },
+      location: {
+        href: "https://chatgpt.com/codex",
+        reloadCalled: false,
+        reload() {
+          this.reloadCalled = true;
+        }
+      },
       innerHeight: 420,
       scrollY: 0,
       setTimeout(callback, delay = 0) {
@@ -496,11 +502,9 @@ async function flushAsyncWork() {
   await rowDeleteButton.click();
   assert.deepEqual(confirmMessages, [
     "确认删除“测试对话”？删除前会创建可撤销备份。",
-    "你正在删除当前打开的会话。删除后会自动切换到其他会话或返回 Codex 首页，确认继续？"
+    "你正在删除当前打开的会话。删除成功后会刷新页面，确认继续？"
   ]);
   const deleteCall = bridgeCalls.find((call) => call.path === "/session/delete");
-  const deleteNavigation = fixture.navigationStateByCall.find((call) => call.path === "/session/delete");
-  assert.deepEqual(deleteNavigation.navigationClicks, ["thread-other-12345"], "删除当前会话前应先切换到其他会话");
   assert.equal(JSON.stringify(deleteCall), JSON.stringify({
     path: "/session/delete",
     payload: {
@@ -511,10 +515,10 @@ async function flushAsyncWork() {
   }));
   assert.equal(selected.listItem.parentElement, null, "删除成功后应同步移除侧边栏行");
   assert.equal(other.listItem.parentElement, document.body, "其他会话不能被误删");
-  assert.equal(other.row.clicked, true, "删除当前会话后应切换到其他可用会话");
   const toast = document.body.querySelector(".codex-pilot-toast");
   assert.ok(toast, "删除成功后应显示 Toast");
   assert.match(toast.textContent, /已删除本地会话|撤销/);
+  assert.equal(fixture.context.window.location.reloadCalled, true, "删除当前会话后应刷新页面");
 
   const undoButton = toast.querySelector("button");
   assert.ok(undoButton, "Toast 应提供撤销按钮");
@@ -531,7 +535,7 @@ async function flushAsyncWork() {
   const fixture = createFixture({ includeOther: false });
   await deleteSelected(fixture);
   assert.equal(fixture.selected.listItem.parentElement, null, "删除成功后应移除唯一会话行");
-  assert.equal(fixture.context.window.location.href, "https://chatgpt.com/codex", "没有其他会话时应回到 Codex 首页");
+  assert.equal(fixture.context.window.location.reloadCalled, true, "删除唯一会话后应刷新页面");
 }
 
 {

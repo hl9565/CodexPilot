@@ -146,12 +146,34 @@ async fn delete_session(ctx: BridgeContext, payload: Value) -> Value {
     let Some(session) = session_ref_from_payload(&payload) else {
         return failed("missing session id");
     };
+    let log_session = session.clone();
+    let delete_session = session.clone();
+    let inspect_adapter = codex_pilot_data::storage::SQLiteStorageAdapter::new(ctx.db_path.clone());
+    if let Ok(detail) = tokio::task::spawn_blocking(move || inspect_adapter.inspect_delete_local(&log_session)).await
+    {
+        if let Ok(detail) = detail {
+            let _ = crate::diagnostic_log::append("session.delete.inspect", detail);
+        }
+    }
     let adapter = codex_pilot_data::storage::SQLiteStorageAdapter::new(ctx.db_path);
-    tokio::task::spawn_blocking(move || adapter.delete_local(&session))
+    tokio::task::spawn_blocking(move || adapter.delete_local(&delete_session))
         .await
         .map_err(|error| error.to_string())
         .and_then(|result| result.map_err(|error| error.to_string()))
-        .map(|result| json!({"status": "ok", "result": result}))
+        .map(|result| {
+            let _ = crate::diagnostic_log::append(
+                "session.delete.result",
+                json!({
+                    "requested_id": session.id,
+                    "normalized_id": session.normalized_id(),
+                    "title": session.title,
+                    "status": result.status,
+                    "message": result.message,
+                    "deleted_session_id": result.session_id,
+                }),
+            );
+            json!({"status": "ok", "result": result})
+        })
         .unwrap_or_else(|message| failed(message))
 }
 

@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "codex-pilot-core"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "anyhow",
  "codex-pilot-data",
@@ -359,7 +359,7 @@ dependencies = [
 
 [[package]]
 name = "codex-pilot-data"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "anyhow",
  "rusqlite",
@@ -369,7 +369,7 @@ dependencies = [
 
 [[package]]
 name = "codex-pilot-launcher"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "anyhow",
  "codex-pilot-core",
@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "codex-pilot-manager"
-version = "1.2.3"
+version = "1.2.4"
 dependencies = [
  "codex-pilot-core",
  "codex-pilot-data",

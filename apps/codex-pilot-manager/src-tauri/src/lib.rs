@@ -31,6 +31,7 @@ struct LaunchSnapshot {
     auto_launch_on_open: bool,
     auto_sync_sessions_on_launch: bool,
     ready: bool,
+    codex_installed: bool,
     state: String,
     action_kind: String,
     action_label: String,
@@ -310,6 +311,7 @@ fn launch_snapshot_with_state(state: LaunchState) -> Result<LaunchSnapshot, Stri
     let prefs = load_launch_preferences();
     let options = launch_options_from_preferences(&prefs);
     let app_dir = codex_pilot_core::app_paths::resolve_codex_app_dir(options.app_dir.as_deref());
+    let codex_installed = app_dir.is_some();
     let command_preview = app_dir
         .as_deref()
         .map(|path| build_codex_command_preview(path, options.debug_port))
@@ -324,6 +326,7 @@ fn launch_snapshot_with_state(state: LaunchState) -> Result<LaunchSnapshot, Stri
         auto_launch_on_open: prefs.auto_launch_on_open,
         auto_sync_sessions_on_launch: prefs.auto_sync_sessions_on_launch,
         ready: !command_preview.is_empty(),
+        codex_installed,
         state: launch_state_label(&state),
         action_kind: launch_action_kind(!command_preview.is_empty(), manager_running, &options),
         action_label: launch_action_label(!command_preview.is_empty(), manager_running, &options),
