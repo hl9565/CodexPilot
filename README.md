@@ -7,13 +7,10 @@
 <p align="center">
   让 Codex 的本地工作流更顺手、更可控。
 </p>
-<p align="center">
 一个软考高级考生的摸鱼解压项目。
 备考学到头秃的时候，用AI写代码换换脑子，顺便了解一下现在的AI到底有多能打。
 整个项目纯AI生成，我只负责提需求和复制粘贴。
 考完试先躺平几天，要是不幸挂科了，就回来继续用AI写代码泄愤。
-</p>
-
 <p align="center">
   <a href="README.md">简体中文</a> · <a href="README.en.md">English</a>
 </p>
