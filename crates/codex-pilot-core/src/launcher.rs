@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::{Child, Command};
 
+const INJECTION_MAX_ATTEMPTS: usize = 2;
+const INJECTION_RETRY_DELAY_MS: u64 = 500;
+
 #[derive(Debug, Clone)]
 pub struct LaunchOptions {
     pub app_dir: Option<PathBuf>,
@@ -84,6 +87,44 @@ pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
         return Ok(());
     }
     let helper_port = options.helper_port;
+    if crate::ports::can_connect_loopback_port(debug_port) {
+        let _ = crate::diagnostic_log::append(
+            "launcher.debug_port_available_reinject",
+            serde_json::json!({
+                "app_dir": app_dir.to_string_lossy(),
+                "debug_port": debug_port,
+                "helper_port": helper_port
+            }),
+        );
+        let helper = crate::helper::start_helper(helper_port).await?;
+        let inject_result = inject_running_codex(debug_port, helper_port).await;
+        match inject_result {
+            Ok(()) => {
+                crate::status::write_status(&crate::status::BackendStatus {
+                    status: "running".to_string(),
+                    version: crate::version::VERSION.to_string(),
+                })?;
+                return Ok(());
+            }
+            Err(error) => {
+                helper.shutdown().await;
+                return Err(error);
+            }
+        }
+    }
+    if is_codex_process_running() {
+        let _ = crate::diagnostic_log::append(
+            "launcher.codex_running_without_debug_port",
+            serde_json::json!({
+                "app_dir": app_dir.to_string_lossy(),
+                "debug_port": debug_port,
+                "helper_port": helper_port
+            }),
+        );
+        anyhow::bail!(
+            "Codex is already running without a reachable debug port. Restart Codex from CodexPilot before trying again."
+        );
+    }
     let _ = crate::diagnostic_log::append(
         "launcher.start",
         serde_json::json!({
@@ -175,23 +216,66 @@ async fn launch_codex(app_dir: &Path, debug_port: u16) -> anyhow::Result<Child> 
             "arg_count": command.len().saturating_sub(1)
         }),
     );
-    Command::new(executable)
+    let mut process = Command::new(executable);
+    process
         .args(&command[1..])
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        process.creation_flags(0x08000000);
+    }
+    process
         .spawn()
         .with_context(|| format!("failed to launch Codex with {executable}"))
+}
+
+fn is_codex_process_running() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("pgrep")
+            .args(["-x", "Codex"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq Codex.exe"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).contains("Codex.exe"))
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        std::process::Command::new("pgrep")
+            .args(["-x", "codex"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
 }
 
 pub async fn inject_running_codex(debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
     let script = crate::assets::injection_script(helper_port);
     let mut last_error = None;
-    for _ in 0..60 {
+    for attempt in 0..INJECTION_MAX_ATTEMPTS {
         match inject_bridge(debug_port, helper_port, &script).await {
             Ok(()) => return Ok(()),
             Err(error) => {
                 last_error = Some(error);
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                if attempt + 1 < INJECTION_MAX_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        INJECTION_RETRY_DELAY_MS,
+                    ))
+                    .await;
+                }
             }
         }
     }
