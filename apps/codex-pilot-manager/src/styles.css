@@ -594,20 +594,33 @@ h2 {
 }
 
 .preferenceFooter {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   flex-wrap: wrap;
   gap: 10px 14px;
   justify-content: space-between;
 }
 
+.preferenceChecks {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .compactCheckbox {
+  align-items: flex-start;
+  line-height: 1.4;
   min-width: 0;
 }
 
 .compactCheckbox span {
   color: var(--app-muted);
   font-size: 13px;
+}
+
+.preferenceChecks .formHint {
+  margin: 0 0 0 24px;
+  max-width: 520px;
 }
 
 .compactButtonRow {
@@ -849,7 +862,7 @@ h2 {
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 3px;
 }
 
@@ -1005,7 +1018,7 @@ h2 {
 .modeGrid {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .modeCard {
@@ -1587,7 +1600,9 @@ dd {
   color: var(--app-text-strong);
   display: grid;
   gap: 11px;
+  overflow: hidden;
   padding: 12px;
+  position: relative;
   text-align: left;
   width: 100%;
 }
@@ -1601,8 +1616,20 @@ dd {
 }
 
 .profileItem.active {
-  background: var(--primary-soft-3);
-  border-color: var(--primary-soft-border-3);
+  background: linear-gradient(180deg, var(--primary-soft) 0%, var(--primary-soft-2) 100%);
+  border-color: var(--primary-soft-border);
+  box-shadow:
+    0 8px 20px rgba(23, 64, 143, 0.08),
+    inset 0 0 0 1px rgba(44, 102, 235, 0.18);
+}
+
+.profileItem.active::before {
+  background: linear-gradient(180deg, #2f6df6 0%, #17408f 100%);
+  border-radius: 0 999px 999px 0;
+  content: "";
+  inset: 10px auto 10px 0;
+  position: absolute;
+  width: 4px;
 }
 
 .profileItem.editing {

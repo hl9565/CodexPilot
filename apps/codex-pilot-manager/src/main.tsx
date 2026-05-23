@@ -39,6 +39,7 @@ type LaunchSnapshot = {
   debugPort: number;
   helperPort: number;
   autoLaunchOnOpen: boolean;
+  autoSyncSessionsOnLaunch: boolean;
   ready: boolean;
   state: string;
   actionKind: string;
@@ -512,9 +513,9 @@ function OverviewView({
         <div className="providerOverviewBody">
           <div className="channelChoiceSummary">
             <div className="segmentedPreview">
-              <span className={provider?.mode === "official" ? "active" : ""}>官方通道</span>
-              <span className={provider?.mode === "hybridApi" ? "active" : ""}>混合中转</span>
               <span className={provider?.mode === "api" ? "active" : ""}>传统中转</span>
+              <span className={provider?.mode === "hybridApi" ? "active" : ""}>混合中转</span>
+              <span className={provider?.mode === "official" ? "active" : ""}>官方通道</span>
             </div>
             <p className="channelModeCopy">
               {provider?.mode === "official"
@@ -587,6 +588,7 @@ function LaunchView({
   const [debugPort, setDebugPort] = React.useState("9688");
   const [helperPort, setHelperPort] = React.useState("58888");
   const [autoLaunchOnOpen, setAutoLaunchOnOpen] = React.useState(false);
+  const [autoSyncSessionsOnLaunch, setAutoSyncSessionsOnLaunch] = React.useState(false);
   const [enhancementSettings, setEnhancementSettings] = React.useState<EnhancementSettings>({
     enabled: true,
     timeline: true,
@@ -605,6 +607,7 @@ function LaunchView({
     setDebugPort(String(launch.debugPort));
     setHelperPort(String(launch.helperPort));
     setAutoLaunchOnOpen(Boolean(launch.autoLaunchOnOpen));
+    setAutoSyncSessionsOnLaunch(Boolean(launch.autoSyncSessionsOnLaunch));
   }, [launch]);
 
   React.useEffect(() => {
@@ -634,6 +637,7 @@ function LaunchView({
         debugPort: debug,
         helperPort: helper,
         autoLaunchOnOpen,
+        autoSyncSessionsOnLaunch,
       },
     })
       .then((message) => {
@@ -713,14 +717,27 @@ function LaunchView({
             </label>
           </div>
           <div className="preferenceFooter">
-            <label className="checkboxRow compactCheckbox">
-              <input
-                checked={autoLaunchOnOpen}
-                onChange={(event) => setAutoLaunchOnOpen(event.target.checked)}
-                type="checkbox"
-              />
-              <span>打开 CodexPilot 时自动启动或注入 Codex</span>
-            </label>
+            <div className="preferenceChecks">
+              <label className="checkboxRow compactCheckbox">
+                <input
+                  checked={autoLaunchOnOpen}
+                  onChange={(event) => setAutoLaunchOnOpen(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>打开 CodexPilot 时自动启动或注入 Codex</span>
+              </label>
+              <label className="checkboxRow compactCheckbox">
+                <input
+                  checked={autoSyncSessionsOnLaunch}
+                  onChange={(event) => setAutoSyncSessionsOnLaunch(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>启动后自动同步会话</span>
+              </label>
+              <p className="formHint">
+                启动或注入成功后，按当前生效通道目标自动检查并同步历史会话归属。
+              </p>
+            </div>
             <div className="buttonRow compactButtonRow">
               <button className="primary" onClick={savePreferences} type="button">保存偏好</button>
               <button className="secondary" onClick={() => setAppPath("")} type="button">使用自动探测</button>
@@ -1079,12 +1096,12 @@ function ProviderView({
         </div>
         <div className="modeGrid">
           <ModeCard
-            active={selectedChannel === "official"}
-            description="使用 Codex/ChatGPT 官方登录，不写入自定义模型供应商。"
+            active={selectedChannel === "api"}
+            description="不依赖 Codex/ChatGPT 登录，直接使用当前 API 配置。"
             disabled={Boolean(pendingAction || pendingChannel)}
-            icon={BadgeCheck}
-            onClick={() => applyChannel("official")}
-            title="官方通道"
+            icon={Bot}
+            onClick={() => applyChannel("api")}
+            title="传统中转"
           />
           <ModeCard
             active={selectedChannel === "hybridApi"}
@@ -1095,12 +1112,12 @@ function ProviderView({
             title="混合中转"
           />
           <ModeCard
-            active={selectedChannel === "api"}
-            description="不依赖 Codex/ChatGPT 登录，直接使用当前 API 配置。"
+            active={selectedChannel === "official"}
+            description="使用 Codex/ChatGPT 官方登录，不写入自定义模型供应商。"
             disabled={Boolean(pendingAction || pendingChannel)}
-            icon={Bot}
-            onClick={() => applyChannel("api")}
-            title="传统中转"
+            icon={BadgeCheck}
+            onClick={() => applyChannel("official")}
+            title="官方通道"
           />
         </div>
       </section>
@@ -1175,6 +1192,16 @@ function ProviderView({
                       </button>
                       <div className="profileItemActions">
                         {selected ? <span className="pill ok">当前配置</span> : null}
+                        {!selected ? (
+                          <button
+                            className="secondary"
+                            disabled={Boolean(pendingAction || pendingChannel)}
+                            onClick={() => selectProfile(profile)}
+                            type="button"
+                          >
+                            启用
+                          </button>
+                        ) : null}
                         <button className="secondary" onClick={() => startEditingProfile(profile)} type="button">
                           编辑
                         </button>

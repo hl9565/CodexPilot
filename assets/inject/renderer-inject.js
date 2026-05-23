@@ -365,12 +365,17 @@
         opacity: 0;
         pointer-events: none;
         position: absolute;
-        right: 76px;
+        right: 56px;
         top: 50%;
         padding: 0;
         transform: translateY(-50%);
         transition: opacity 120ms ease;
         z-index: 20;
+      }
+
+      .${actionGroupClass}[data-open="true"] {
+        opacity: 1;
+        pointer-events: auto;
       }
 
       [data-codex-pilot-row="true"]:hover .${actionGroupClass},
@@ -381,8 +386,8 @@
 
       [data-codex-pilot-row="true"]:hover [data-thread-title],
       [data-codex-pilot-row="true"]:focus-within [data-thread-title] {
-        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 146px), transparent calc(100% - 130px));
-        mask-image: linear-gradient(90deg, #000 calc(100% - 146px), transparent calc(100% - 130px));
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 74px), transparent calc(100% - 58px));
+        mask-image: linear-gradient(90deg, #000 calc(100% - 74px), transparent calc(100% - 58px));
       }
 
       .${actionButtonClass},
@@ -399,6 +404,69 @@
         justify-content: center;
         padding: 0;
         width: 26px;
+      }
+
+      .codex-pilot-row-action-trigger {
+        align-items: center;
+        background: rgba(255, 255, 255, 0.76);
+        border: 1px solid rgba(148, 163, 184, 0.42);
+        border-radius: 999px;
+        box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+        color: #6b7788;
+        cursor: pointer;
+        display: inline-flex;
+        height: 22px;
+        justify-content: center;
+        padding: 0;
+        width: 22px;
+      }
+
+      .codex-pilot-row-action-trigger:hover,
+      .${actionGroupClass}[data-open="true"] .codex-pilot-row-action-trigger {
+        background: rgba(255, 255, 255, 0.92);
+        border-color: rgba(100, 116, 139, 0.5);
+        color: #324155;
+      }
+
+      .codex-pilot-row-action-trigger svg {
+        display: block;
+        height: 13px;
+        pointer-events: none;
+        width: 13px;
+      }
+
+      .codex-pilot-row-action-panel {
+        align-items: center;
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(203, 213, 225, 0.96);
+        border-radius: 999px;
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+        display: inline-flex;
+        gap: 6px;
+        opacity: 0;
+        padding: 4px 6px;
+        pointer-events: none;
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%) scale(0.98);
+        transition: opacity 120ms ease, transform 120ms ease;
+        white-space: nowrap;
+      }
+
+      .${actionGroupClass}[data-side="right"] .codex-pilot-row-action-panel {
+        left: calc(100% + 8px);
+      }
+
+      .${actionGroupClass}[data-side="left"] .codex-pilot-row-action-panel {
+        right: calc(100% + 8px);
+      }
+
+      .${actionGroupClass}[data-open="true"] .codex-pilot-row-action-panel,
+      [data-codex-pilot-row="true"]:hover .codex-pilot-row-action-panel,
+      [data-codex-pilot-row="true"]:focus-within .codex-pilot-row-action-panel {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(-50%) scale(1);
       }
 
       .${actionButtonClass}:hover,
@@ -718,6 +786,55 @@
     button.addEventListener("click", onActivate, true);
   }
 
+  function setRowActionGroupOpen(group, open) {
+    if (!group) return;
+    group.dataset.open = open ? "true" : "false";
+  }
+
+  function closeOtherRowActionGroups(activeGroup) {
+    document.querySelectorAll(`.${actionGroupClass}[data-open="true"]`).forEach((node) => {
+      if (node !== activeGroup) {
+        node.dataset.open = "false";
+      }
+    });
+  }
+
+  function layoutRowActionGroup(group) {
+    if (!group) return;
+    const panel = group.querySelector(".codex-pilot-row-action-panel");
+    if (!panel) return;
+    group.dataset.side = "right";
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const rect = panel.getBoundingClientRect();
+    if (rect.right > viewportWidth - 12) {
+      group.dataset.side = "left";
+    }
+  }
+
+  function installRowActionGroupEvents(group) {
+    if (!group || group.dataset.eventsBound === "true") return;
+    group.dataset.eventsBound = "true";
+    const trigger = group.querySelector(".codex-pilot-row-action-trigger");
+    if (!trigger) return;
+    installRowActionEvents(trigger, (event) => {
+      stopRowActionEvent(event);
+      const nextOpen = group.dataset.open !== "true";
+      closeOtherRowActionGroups(group);
+      setRowActionGroupOpen(group, nextOpen);
+      if (nextOpen) {
+        layoutRowActionGroup(group);
+      }
+    });
+    group.addEventListener("mouseleave", () => setRowActionGroupOpen(group, false));
+    group.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!group.contains(document.activeElement)) {
+          setRowActionGroupOpen(group, false);
+        }
+      }, 0);
+    });
+  }
+
   function setIconButtonContent(button, label, svgPath) {
     button.setAttribute("aria-label", label);
     button.title = label;
@@ -842,6 +959,20 @@
     row.dataset.codexPilotRow = "true";
     const group = document.createElement("div");
     group.className = actionGroupClass;
+    group.dataset.open = "false";
+    group.dataset.side = "right";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "codex-pilot-row-action-trigger";
+    setIconButtonContent(
+      trigger,
+      "更多 Pilot 操作",
+      '<circle cx="12" cy="12" r="1.6"/><circle cx="6" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/>'
+    );
+
+    const panel = document.createElement("div");
+    panel.className = "codex-pilot-row-action-panel";
 
     const exportButton = document.createElement("button");
     exportButton.type = "button";
@@ -870,7 +1001,9 @@
       await deleteSession(session, row);
     });
 
-    group.append(exportButton, deleteButton);
+    panel.append(exportButton, deleteButton);
+    group.append(trigger, panel);
+    installRowActionGroupEvents(group);
     row.appendChild(group);
   }
 

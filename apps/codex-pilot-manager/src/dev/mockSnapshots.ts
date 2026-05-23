@@ -13,6 +13,7 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     debugPort: 9688,
     helperPort: 58888,
     autoLaunchOnOpen: false,
+    autoSyncSessionsOnLaunch: false,
     ready: true,
     state: "ready",
     actionKind: "reinject",

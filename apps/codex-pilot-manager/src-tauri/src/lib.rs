@@ -7,6 +7,7 @@ use std::time::Duration;
 use tauri::Manager;
 
 const MANAGER_INJECT_TIMEOUT: Duration = Duration::from_secs(25);
+const MANAGER_LAUNCH_TIMEOUT: Duration = Duration::from_secs(25);
 
 struct ManagerState {
     launch_state: Mutex<LaunchState>,
@@ -28,6 +29,7 @@ struct LaunchSnapshot {
     debug_port: u16,
     helper_port: u16,
     auto_launch_on_open: bool,
+    auto_sync_sessions_on_launch: bool,
     ready: bool,
     state: String,
     action_kind: String,
@@ -47,6 +49,8 @@ struct LaunchPreferences {
     helper_port: u16,
     #[serde(default)]
     auto_launch_on_open: bool,
+    #[serde(default)]
+    auto_sync_sessions_on_launch: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -85,6 +89,7 @@ impl Default for LaunchPreferences {
             debug_port: options.debug_port,
             helper_port: options.helper_port,
             auto_launch_on_open: false,
+            auto_sync_sessions_on_launch: false,
         }
     }
 }
@@ -317,6 +322,7 @@ fn launch_snapshot_with_state(state: LaunchState) -> Result<LaunchSnapshot, Stri
         debug_port: options.debug_port,
         helper_port: options.helper_port,
         auto_launch_on_open: prefs.auto_launch_on_open,
+        auto_sync_sessions_on_launch: prefs.auto_sync_sessions_on_launch,
         ready: !command_preview.is_empty(),
         state: launch_state_label(&state),
         action_kind: launch_action_kind(!command_preview.is_empty(), manager_running, &options),
@@ -347,7 +353,7 @@ async fn launch_codex(state: tauri::State<'_, ManagerState>) -> Result<String, S
         return Ok("CodexPilot 已在运行中。".to_string());
     }
     if codex_pilot_core::ports::can_connect_loopback_port(options.debug_port) {
-        return inject_existing_codex(&state, options.debug_port, options.helper_port).await;
+        return inject_existing_codex(&state, &prefs, options.debug_port, options.helper_port).await;
     }
     if is_codex_process_running() {
         return Err(
@@ -355,7 +361,7 @@ async fn launch_codex(state: tauri::State<'_, ManagerState>) -> Result<String, S
                 .to_string(),
         );
     }
-    spawn_launcher(&state, &prefs)
+    spawn_launcher(&state, &prefs).await
 }
 
 #[tauri::command]
@@ -365,7 +371,7 @@ async fn reinject_codex(state: tauri::State<'_, ManagerState>) -> Result<String,
     if !codex_pilot_core::ports::can_connect_loopback_port(options.debug_port) {
         return Err("未检测到 Codex 调试端口，无法重新注入。".to_string());
     }
-    inject_existing_codex(&state, options.debug_port, options.helper_port).await
+    inject_existing_codex(&state, &prefs, options.debug_port, options.helper_port).await
 }
 
 #[tauri::command]
@@ -373,11 +379,12 @@ async fn restart_codex_and_inject(state: tauri::State<'_, ManagerState>) -> Resu
     request_codex_quit()?;
     std::thread::sleep(std::time::Duration::from_millis(1200));
     let prefs = load_launch_preferences();
-    spawn_launcher(&state, &prefs)
+    spawn_launcher(&state, &prefs).await
 }
 
 async fn inject_existing_codex(
     state: &tauri::State<'_, ManagerState>,
+    prefs: &LaunchPreferences,
     debug_port: u16,
     helper_port: u16,
 ) -> Result<String, String> {
@@ -392,9 +399,11 @@ async fn inject_existing_codex(
                 version: codex_pilot_core::version::VERSION.to_string(),
             })
             .map_err(|error| format!("写入状态失败：{error}"))?;
-            let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
-            *current = LaunchState::Running;
-            Ok("已重新注入 CodexPilot。".to_string())
+            {
+                let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
+                *current = LaunchState::Running;
+            }
+            Ok(auto_sync_sessions_after_launch("reinject", prefs).await)
         }
         Err(error) => {
             let message = format!("重新注入失败：{error}");
@@ -463,7 +472,7 @@ async fn inject_running_codex_for_manager(debug_port: u16, helper_port: u16) -> 
     }
 }
 
-fn spawn_launcher(
+async fn spawn_launcher(
     state: &tauri::State<'_, ManagerState>,
     prefs: &LaunchPreferences,
 ) -> Result<String, String> {
@@ -503,9 +512,22 @@ fn spawn_launcher(
         return Err(message);
     }
 
-    let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
-    *current = LaunchState::Running;
-    Ok("已启动 CodexPilot。".to_string())
+    clear_backend_status_file();
+    match wait_for_backend_launch(prefs.helper_port).await {
+        Ok(()) => {
+            {
+                let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
+                *current = LaunchState::Running;
+            }
+            Ok(auto_sync_sessions_after_launch("launch", prefs).await)
+        }
+        Err(message) => {
+            if let Ok(mut current) = state.launch_state.lock() {
+                *current = LaunchState::Failed(message.clone());
+            }
+            Err(message)
+        }
+    }
 }
 
 #[tauri::command]
@@ -513,6 +535,175 @@ fn save_launch_preferences(request: LaunchPreferences) -> Result<String, String>
     let prefs = sanitize_launch_preferences(request)?;
     save_launch_preferences_to_path(&manager_config_path(), &prefs)?;
     Ok("启动偏好已保存。".to_string())
+}
+
+async fn wait_for_backend_launch(helper_port: u16) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + MANAGER_LAUNCH_TIMEOUT;
+    loop {
+        let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(helper_port);
+        let backend_running = codex_pilot_core::status::read_status()
+            .ok()
+            .flatten()
+            .map(|status| status.status == "running")
+            .unwrap_or(false);
+        if helper_reachable && backend_running {
+            let _ = append_diagnostic_event(
+                "manager.launch_backend_ready",
+                json!({
+                    "helper_port": helper_port
+                }),
+            );
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            let message = format!(
+                "启动 CodexPilot 超时，已等待 {} 秒。请查看诊断后重试。",
+                MANAGER_LAUNCH_TIMEOUT.as_secs()
+            );
+            let _ = append_diagnostic_event(
+                "manager.launch_backend_timeout",
+                json!({
+                    "helper_port": helper_port,
+                    "timeout_ms": MANAGER_LAUNCH_TIMEOUT.as_millis(),
+                    "helper_reachable": helper_reachable,
+                    "backend_running": backend_running
+                }),
+            );
+            return Err(message);
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+}
+
+fn clear_backend_status_file() {
+    let path = codex_pilot_core::status::status_path();
+    if path.exists() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+async fn auto_sync_sessions_after_launch(
+    launch_action: &str,
+    prefs: &LaunchPreferences,
+) -> String {
+    let success_message = match launch_action {
+        "reinject" => "已重新注入 CodexPilot。",
+        _ => "已启动 CodexPilot。",
+    };
+
+    if !prefs.auto_sync_sessions_on_launch {
+        return success_message.to_string();
+    }
+
+    let target_provider = current_effective_sync_target();
+    let inspection_result = tauri::async_runtime::spawn_blocking({
+        let target_provider = target_provider.clone();
+        move || {
+            codex_pilot_data::provider_sync::inspect_provider_sync_with_target(
+                None,
+                Some(&target_provider),
+            )
+        }
+    })
+    .await;
+
+    let inspection = match inspection_result {
+        Ok(Ok(value)) => value,
+        Ok(Err(error)) => {
+            let message = format!("自动同步会话检查失败：{error}");
+            let _ = append_diagnostic_event(
+                "manager.auto_session_sync_failed",
+                json!({
+                    "launch_action": launch_action,
+                    "target_provider": target_provider,
+                    "stage": "inspect",
+                    "message": message
+                }),
+            );
+            return format!("{success_message} 但自动同步会话失败：{message}");
+        }
+        Err(error) => {
+            let message = format!("自动同步会话检查任务失败：{error}");
+            let _ = append_diagnostic_event(
+                "manager.auto_session_sync_failed",
+                json!({
+                    "launch_action": launch_action,
+                    "target_provider": target_provider,
+                    "stage": "inspect_join",
+                    "message": message
+                }),
+            );
+            return format!("{success_message} 但自动同步会话失败：{message}");
+        }
+    };
+
+    let _ = append_diagnostic_event(
+        "manager.auto_session_sync_checked",
+        json!({
+            "launch_action": launch_action,
+            "target_provider": inspection.target_provider,
+            "rollout_rewrite_needed": inspection.rollout_rewrite_needed,
+            "sqlite_provider_rows_needing_sync": inspection.sqlite_provider_rows_needing_sync
+        }),
+    );
+
+    if inspection.rollout_rewrite_needed == 0 && inspection.sqlite_provider_rows_needing_sync == 0 {
+        return match launch_action {
+            "reinject" => "已重新注入 CodexPilot，无需同步会话。".to_string(),
+            _ => "已启动 CodexPilot，无需同步会话。".to_string(),
+        };
+    }
+
+    let sync_result = tauri::async_runtime::spawn_blocking({
+        let target_provider = inspection.target_provider.clone();
+        move || codex_pilot_data::provider_sync::run_provider_sync_with_target(None, Some(&target_provider))
+    })
+    .await;
+
+    let sync_result = match sync_result {
+        Ok(value) => value,
+        Err(error) => {
+            let message = format!("自动同步会话任务失败：{error}");
+            let _ = append_diagnostic_event(
+                "manager.auto_session_sync_failed",
+                json!({
+                    "launch_action": launch_action,
+                    "target_provider": inspection.target_provider,
+                    "stage": "sync_join",
+                    "message": message
+                }),
+            );
+            return format!("{success_message} 但自动同步会话失败：{message}");
+        }
+    };
+
+    let _ = append_diagnostic_event(
+        "manager.auto_session_sync_finished",
+        json!({
+            "launch_action": launch_action,
+            "target_provider": inspection.target_provider,
+            "status": format!("{:?}", sync_result.status),
+            "message": sync_result.message
+        }),
+    );
+
+    if sync_result.status != codex_pilot_data::provider_sync::ProviderSyncStatus::Synced {
+        return format!("{success_message} 但自动同步会话失败：{}", sync_result.message);
+    }
+
+    match launch_action {
+        "reinject" => "已重新注入 CodexPilot，并完成会话同步。".to_string(),
+        _ => "已启动 CodexPilot，并完成会话同步。".to_string(),
+    }
+}
+
+fn current_effective_sync_target() -> String {
+    let provider = codex_pilot_core::relay_config::default_relay_provider_config();
+    if provider.active {
+        provider.provider
+    } else {
+        "openai".to_string()
+    }
 }
 
 #[tauri::command]
@@ -1708,6 +1899,7 @@ mod tests {
             debug_port: 9444,
             helper_port: 58444,
             auto_launch_on_open: true,
+            auto_sync_sessions_on_launch: true,
         })
         .unwrap();
         save_launch_preferences_to_path(&path, &prefs).unwrap();
@@ -1717,6 +1909,7 @@ mod tests {
         assert_eq!(loaded.debug_port, 9444);
         assert_eq!(loaded.helper_port, 58444);
         assert!(loaded.auto_launch_on_open);
+        assert!(loaded.auto_sync_sessions_on_launch);
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1728,6 +1921,7 @@ mod tests {
             debug_port: 9444,
             helper_port: 9444,
             auto_launch_on_open: false,
+            auto_sync_sessions_on_launch: false,
         });
 
         assert!(result.unwrap_err().contains("不能相同"));
@@ -1740,6 +1934,7 @@ mod tests {
             debug_port: 9333,
             helper_port: 57321,
             auto_launch_on_open: false,
+            auto_sync_sessions_on_launch: false,
         })
         .unwrap();
 
@@ -1760,6 +1955,7 @@ mod tests {
             debug_port: 9444,
             helper_port: 58888,
             auto_launch_on_open: false,
+            auto_sync_sessions_on_launch: false,
         })
         .unwrap();
 
