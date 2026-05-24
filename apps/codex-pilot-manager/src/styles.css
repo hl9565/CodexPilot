@@ -72,6 +72,7 @@
   --shadow-medium: rgba(15, 23, 42, 0.1);
   --shadow-strong: rgba(15, 23, 42, 0.2);
   --shadow-dialog: rgba(15, 23, 42, 0.24);
+  --popover-bg: rgba(255, 255, 255, 0.72);
   color: var(--app-text);
   background: var(--app-bg);
   color-scheme: light;
@@ -154,6 +155,7 @@
   --shadow-medium: rgba(0, 0, 0, 0.22);
   --shadow-strong: rgba(0, 0, 0, 0.36);
   --shadow-dialog: rgba(0, 0, 0, 0.42);
+  --popover-bg: rgba(10, 14, 22, 0.82);
   color-scheme: dark;
 }
 
@@ -842,57 +844,77 @@ h2 {
 }
 
 .providerOverviewBody {
+  align-items: start;
   display: grid;
-  gap: 9px;
-  grid-template-columns: minmax(380px, 1.25fr) minmax(250px, 0.75fr);
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
 }
 
-.channelChoiceSummary {
-  background: var(--surface-subtle);
+.providerSummaryCard {
+  background: linear-gradient(180deg, var(--surface-subtle), var(--surface-soft));
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: 10px;
   display: grid;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
-  padding: 10px;
+  padding: 16px;
 }
 
-.channelChoiceSummary p {
-  color: var(--app-muted-2);
-  font-size: 12px;
-  line-height: 1.35;
+.providerSummaryCard.warning {
+  background: color-mix(in srgb, var(--warning-bg) 70%, white);
+  border-color: var(--warning-border);
+}
+
+.providerSummaryLabel {
+  color: var(--app-label);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.providerSummaryCard strong {
+  color: var(--app-text-strong);
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.providerSummaryCard p {
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
-.channelChoiceSummary .channelModeCopy {
-  color: var(--app-muted);
-  line-height: 1.45;
-}
-
-.segmentedPreview {
-  background: var(--surface-control);
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
+.providerSummaryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 3px;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.segmentedPreview span {
-  align-items: center;
-  border-radius: 5px;
-  color: var(--app-muted);
-  display: flex;
-  font-size: 12px;
-  font-weight: 700;
-  height: 28px;
-  justify-content: center;
-}
-
-.segmentedPreview span.active {
+.summaryMetric {
   background: var(--surface);
-  box-shadow: 0 1px 3px var(--shadow-medium);
-  color: var(--primary-strong);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.summaryMetric span {
+  color: var(--app-label);
+  font-size: 11px;
+}
+
+.summaryMetric strong {
+  color: var(--app-text-heading);
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rowIcon {
@@ -908,35 +930,46 @@ h2 {
   width: 26px;
 }
 
-.profileOverviewGrid {
+.recoveryMetric {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
+  padding: 8px 10px;
 }
 
-.fieldLine {
+.recoveryMetricHeader {
   align-items: center;
-  display: grid;
+  display: flex;
+  justify-content: space-between;
   gap: 8px;
-  grid-template-columns: 74px minmax(0, 1fr);
 }
 
-.fieldLine span {
+.recoveryMetricHeader span {
   color: var(--app-label);
   font-size: 11px;
 }
 
-.fieldLine strong {
-  background: var(--surface);
-  border: 1px solid var(--border-soft);
-  border-radius: 5px;
+.recoveryMetric strong {
   color: var(--app-text-heading);
   font-size: 12px;
-  font-weight: 600;
-  min-width: 0;
-  overflow: hidden;
-  padding: 5px 7px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 700;
+}
+
+.helpIconButton {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--app-muted);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  padding: 0;
+}
+
+.helpIconButton:hover {
+  color: var(--primary-strong);
 }
 
 .providerLayout {
@@ -1097,6 +1130,96 @@ h2 {
 .syncTool {
   display: grid;
   gap: 12px;
+}
+
+.sessionZipPanel {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sessionZipInlineBar {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.sessionZipInlineCopy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sessionZipInlineCopy .panelTitle h3 {
+  color: var(--app-text-heading);
+  font-size: 15px;
+  margin: 0;
+}
+
+.sessionZipInlineCopy .formHint {
+  margin: 0;
+}
+
+.zipInspectCard {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.zipInspectHeader {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.zipInspectHeader strong {
+  color: var(--app-text-heading);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zipModeGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.modeCard.dangerMode.active {
+  background: var(--danger-action-bg);
+  border-color: var(--danger-border-hover);
+  box-shadow: inset 0 0 0 1px var(--danger-border-hover);
+}
+
+.inlineNotice {
+  align-items: flex-start;
+  background: var(--primary-soft-3);
+  border: 1px solid var(--primary-soft-border-3);
+  border-radius: 8px;
+  color: var(--app-text-soft);
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.inlineNotice.warning {
+  background: var(--warning-bg);
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+}
+
+.overwriteConfirmCard {
+  display: grid;
+  gap: 10px;
 }
 
 .syncControls {
@@ -1785,6 +1908,54 @@ dd {
   color: var(--app-muted-3);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.providerNotice button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.noticeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.noticeHelp {
+  display: grid;
+  gap: 8px;
+}
+
+.helpToggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--app-muted);
+  cursor: pointer;
+  display: inline-flex;
+  gap: 6px;
+  justify-self: start;
+  padding: 0;
+}
+
+.helpToggle:hover {
+  color: var(--primary-strong);
+}
+
+.helpPopover {
+  background: var(--popover-bg);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.helpPopover p {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .formHint {

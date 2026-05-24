@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const RELAY_PROVIDER: &str = "CodexPilot";
+const CHANNEL_MODE_KEY: &str = "codex_pilot_channel_mode";
 
 pub use crate::protocol_proxy::UpstreamProtocol;
 
@@ -40,6 +41,13 @@ pub struct RelayApplyResult {
     pub config_path: String,
     pub backup_path: Option<String>,
     pub configured: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficialConfigSnapshot {
+    pub config_toml: String,
+    pub captured_at_ms: u64,
 }
 
 pub fn default_relay_provider_config() -> RelayProviderConfig {
@@ -98,11 +106,7 @@ pub fn apply_relay_provider_config(
     base_url: &str,
     bearer_token: &str,
 ) -> anyhow::Result<RelayApplyResult> {
-    apply_relay_provider_config_with_protocol(
-        base_url,
-        bearer_token,
-        UpstreamProtocol::Responses,
-    )
+    apply_relay_provider_config_with_protocol(base_url, bearer_token, UpstreamProtocol::Responses)
 }
 
 pub fn apply_relay_provider_config_to_home(
@@ -153,11 +157,7 @@ pub fn apply_api_provider_config(
     base_url: &str,
     bearer_token: &str,
 ) -> anyhow::Result<RelayApplyResult> {
-    apply_api_provider_config_with_protocol(
-        base_url,
-        bearer_token,
-        UpstreamProtocol::Responses,
-    )
+    apply_api_provider_config_with_protocol(base_url, bearer_token, UpstreamProtocol::Responses)
 }
 
 pub fn apply_api_provider_config_with_protocol(
@@ -165,8 +165,23 @@ pub fn apply_api_provider_config_with_protocol(
     bearer_token: &str,
     upstream_protocol: UpstreamProtocol,
 ) -> anyhow::Result<RelayApplyResult> {
+    apply_api_provider_config_to_home_with_protocol(
+        &crate::app_paths::codex_home_dir(),
+        base_url,
+        bearer_token,
+        upstream_protocol,
+    )
+}
+
+pub fn apply_api_provider_config_to_home_with_protocol(
+    home: &Path,
+    base_url: &str,
+    bearer_token: &str,
+    upstream_protocol: UpstreamProtocol,
+) -> anyhow::Result<RelayApplyResult> {
+    write_pure_api_auth_json(home, bearer_token)?;
     apply_api_provider_config_to_path_with_protocol(
-        &crate::app_paths::codex_config_path(),
+        &home.join("config.toml"),
         base_url,
         bearer_token,
         upstream_protocol,
@@ -213,12 +228,8 @@ pub fn apply_relay_provider_config_to_path_with_protocol(
         upstream_protocol,
         crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     );
-    let updated = upsert_relay_provider_config(
-        &existing,
-        &codex_base_url,
-        bearer_token,
-        upstream_protocol,
-    );
+    let updated =
+        upsert_relay_provider_config(&existing, &codex_base_url, bearer_token, upstream_protocol);
     std::fs::write(config_path, updated)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
 
@@ -270,12 +281,8 @@ pub fn apply_api_provider_config_to_path_with_protocol(
         upstream_protocol,
         crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     );
-    let updated = upsert_api_provider_config(
-        &existing,
-        &codex_base_url,
-        bearer_token,
-        upstream_protocol,
-    );
+    let updated =
+        upsert_api_provider_config(&existing, &codex_base_url, bearer_token, upstream_protocol);
     std::fs::write(config_path, updated)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
 
@@ -295,6 +302,56 @@ pub fn clear_relay_provider_config_from_home(home: &Path) -> anyhow::Result<Rela
     clear_relay_provider_config_from_path(&home.join("config.toml"))
 }
 
+pub fn capture_official_config_snapshot_from_home(
+    home: &Path,
+) -> anyhow::Result<Option<OfficialConfigSnapshot>> {
+    let config_path = home.join("config.toml");
+    let current = relay_provider_config_from_home(home);
+    if current.active {
+        return Ok(None);
+    }
+    let config_toml = std::fs::read_to_string(&config_path).unwrap_or_default();
+    Ok(Some(OfficialConfigSnapshot {
+        config_toml,
+        captured_at_ms: now_ms() as u64,
+    }))
+}
+
+pub fn restore_official_config_snapshot_from_home(
+    home: &Path,
+    snapshot: &OfficialConfigSnapshot,
+) -> anyhow::Result<RelayApplyResult> {
+    restore_official_config_snapshot_to_path(&home.join("config.toml"), snapshot)
+}
+
+pub fn restore_official_config_snapshot_to_path(
+    config_path: &Path,
+    snapshot: &OfficialConfigSnapshot,
+) -> anyhow::Result<RelayApplyResult> {
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let existing = std::fs::read_to_string(config_path).unwrap_or_default();
+    let backup_path = backup_existing_config(config_path, &existing)?;
+    std::fs::write(config_path, &snapshot.config_toml)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    let _ = clear_api_key_auth_json(
+        &config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("auth.json"),
+    );
+
+    let status = relay_provider_config_from_path(config_path);
+    Ok(RelayApplyResult {
+        config_path: status.config_path,
+        backup_path: backup_path.map(|path| path.to_string_lossy().to_string()),
+        configured: status.configured,
+    })
+}
+
 pub fn clear_relay_provider_config_from_path(
     config_path: &Path,
 ) -> anyhow::Result<RelayApplyResult> {
@@ -310,6 +367,12 @@ pub fn clear_relay_provider_config_from_path(
     let updated = remove_root_key(&without_key, "model_provider");
     std::fs::write(config_path, updated)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
+    let _ = clear_api_key_auth_json(
+        &config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("auth.json"),
+    );
 
     let status = relay_provider_config_from_path(config_path);
     Ok(RelayApplyResult {
@@ -352,11 +415,20 @@ fn relay_provider_config_from_contents(
         .map(|value| unquote_toml_string(value))
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let stored_mode = provider
+        .as_ref()
+        .and_then(|values| values.get(CHANNEL_MODE_KEY))
+        .map(|value| unquote_toml_string(value))
+        .filter(|value| !value.trim().is_empty());
     let upstream_protocol = base_url
         .as_deref()
         .map(infer_upstream_protocol_from_base_url)
         .unwrap_or_default();
-    let mode = if active && requires_openai_auth {
+    let mode = if active && stored_mode.as_deref() == Some("api") {
+        "api"
+    } else if active && stored_mode.as_deref() == Some("hybridApi") {
+        "hybridApi"
+    } else if active && requires_openai_auth {
         "hybridApi"
     } else if active && base_url.is_some() && has_bearer_token {
         "api"
@@ -516,6 +588,7 @@ fn upsert_relay_provider_config(
         "wire_api = \"responses\"".to_string(),
         "requires_openai_auth = true".to_string(),
         format!("base_url = \"{}\"", toml_escape(base_url)),
+        format!("{CHANNEL_MODE_KEY} = \"hybridApi\""),
         format!(
             "codex_pilot_upstream_protocol = \"{}\"",
             upstream_protocol.as_config_value()
@@ -538,18 +611,13 @@ fn upsert_api_provider_config(
 ) -> String {
     let mut updated = upsert_root_keys(
         contents,
-        &[
-            (
-                "model_provider",
-                format!("\"{}\"", toml_escape(RELAY_PROVIDER)),
-            ),
-            (
-                "OPENAI_API_KEY",
-                format!("\"{}\"", toml_escape(bearer_token)),
-            ),
-        ],
+        &[(
+            "model_provider",
+            format!("\"{}\"", toml_escape(RELAY_PROVIDER)),
+        )],
     );
     updated = remove_table(&updated, &format!("model_providers.{RELAY_PROVIDER}"));
+    updated = remove_root_key(&updated, "OPENAI_API_KEY");
 
     let mut lines = updated.lines().map(ToString::to_string).collect::<Vec<_>>();
     let insert_at = first_non_provider_table_index(&lines).unwrap_or(lines.len());
@@ -557,16 +625,53 @@ fn upsert_api_provider_config(
         format!("[model_providers.{RELAY_PROVIDER}]"),
         format!("name = \"{}\"", toml_escape(RELAY_PROVIDER)),
         "wire_api = \"responses\"".to_string(),
-        "env_key = \"OPENAI_API_KEY\"".to_string(),
+        "requires_openai_auth = true".to_string(),
         format!("base_url = \"{}\"", toml_escape(base_url)),
+        format!("{CHANNEL_MODE_KEY} = \"api\""),
         format!(
             "codex_pilot_upstream_protocol = \"{}\"",
             upstream_protocol.as_config_value()
+        ),
+        format!(
+            "experimental_bearer_token = \"{}\"",
+            toml_escape(bearer_token)
         ),
         String::new(),
     ];
     lines.splice(insert_at..insert_at, provider_lines);
     finish_lines(lines)
+}
+
+fn write_pure_api_auth_json(home: &Path, bearer_token: &str) -> anyhow::Result<()> {
+    std::fs::create_dir_all(home)
+        .with_context(|| format!("failed to create {}", home.display()))?;
+    let auth_path = home.join("auth.json");
+    let value = serde_json::json!({
+        "OPENAI_API_KEY": bearer_token.trim()
+    });
+    std::fs::write(&auth_path, serde_json::to_vec_pretty(&value)?)
+        .with_context(|| format!("failed to write {}", auth_path.display()))?;
+    Ok(())
+}
+
+fn clear_api_key_auth_json(auth_path: &Path) -> anyhow::Result<()> {
+    if !auth_path.exists() {
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(auth_path)
+        .with_context(|| format!("failed to read {}", auth_path.display()))?;
+    let Ok(mut value) = serde_json::from_str::<Value>(&existing) else {
+        return Ok(());
+    };
+    let Some(object) = value.as_object_mut() else {
+        return Ok(());
+    };
+    if object.remove("OPENAI_API_KEY").is_none() {
+        return Ok(());
+    }
+    std::fs::write(auth_path, serde_json::to_vec_pretty(&value)?)
+        .with_context(|| format!("failed to write {}", auth_path.display()))?;
+    Ok(())
 }
 
 fn root_key_string(contents: &str, key: &str) -> Option<String> {
@@ -704,9 +809,7 @@ fn toml_escape(value: &str) -> String {
 }
 
 fn infer_upstream_protocol_from_base_url(base_url: &str) -> UpstreamProtocol {
-    if base_url.starts_with("http://127.0.0.1:")
-        || base_url.starts_with("http://localhost:")
-    {
+    if base_url.starts_with("http://127.0.0.1:") || base_url.starts_with("http://localhost:") {
         return UpstreamProtocol::ChatCompletions;
     }
     UpstreamProtocol::Responses
@@ -841,13 +944,14 @@ base_url = "http://127.0.0.1:8000"
         assert!(updated.contains("# keep this"));
         assert!(updated.contains("model = \"gpt-5\""));
         assert!(updated.contains("model_provider = \"CodexPilot\""));
-        assert!(updated.contains("OPENAI_API_KEY = \"sk-api\""));
         assert!(updated.contains("[model_providers.CodexPilot]"));
         assert!(updated.contains("wire_api = \"responses\""));
-        assert!(updated.contains("env_key = \"OPENAI_API_KEY\""));
+        assert!(updated.contains("requires_openai_auth = true"));
+        assert!(updated.contains("codex_pilot_channel_mode = \"api\""));
         assert!(updated.contains("base_url = \"https://api.example/v1\""));
-        assert!(!updated.contains("requires_openai_auth"));
-        assert!(!updated.contains("experimental_bearer_token"));
+        assert!(updated.contains("experimental_bearer_token = \"sk-api\""));
+        assert!(!updated.contains("OPENAI_API_KEY = \"sk-api\""));
+        assert!(!updated.contains("env_key = \"OPENAI_API_KEY\""));
         assert!(!updated.contains("https://old.example/v1"));
         assert!(updated.contains("[mcp_servers.local]"));
     }
@@ -860,8 +964,10 @@ OPENAI_API_KEY = "sk-api"
 [model_providers.CodexPilot]
 name = "CodexPilot"
 wire_api = "responses"
-env_key = "OPENAI_API_KEY"
+requires_openai_auth = true
 base_url = "https://api.example/v1"
+codex_pilot_channel_mode = "api"
+experimental_bearer_token = "sk-api"
 "#;
 
         let status = relay_provider_config_from_contents(
@@ -879,9 +985,41 @@ base_url = "https://api.example/v1"
         assert!(status.configured);
         assert_eq!(status.mode, "api");
         assert!(!status.authenticated);
-        assert!(!status.requires_openai_auth);
+        assert!(status.requires_openai_auth);
         assert!(status.has_bearer_token);
         assert_eq!(status.base_url.as_deref(), Some("https://api.example/v1"));
+    }
+
+    #[test]
+    fn apply_api_provider_writes_pure_api_auth_json_and_config() {
+        let root = unique_temp_dir();
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("auth.json"),
+            r#"{"auth_mode":"chatgpt","tokens":{"access_token":"token"}}"#,
+        )
+        .unwrap();
+
+        let apply = apply_api_provider_config_to_home_with_protocol(
+            &root,
+            "https://api.example/v1",
+            "sk-api",
+            UpstreamProtocol::Responses,
+        )
+        .unwrap();
+
+        assert!(apply.configured);
+        let auth = std::fs::read_to_string(root.join("auth.json")).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&auth).unwrap(),
+            serde_json::json!({"OPENAI_API_KEY": "sk-api"})
+        );
+        let config = std::fs::read_to_string(root.join("config.toml")).unwrap();
+        assert!(config.contains("codex_pilot_channel_mode = \"api\""));
+        assert!(config.contains("requires_openai_auth = true"));
+        assert!(config.contains("experimental_bearer_token = \"sk-api\""));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

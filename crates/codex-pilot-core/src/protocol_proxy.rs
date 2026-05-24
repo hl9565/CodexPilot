@@ -103,7 +103,9 @@ pub async fn handle_responses_proxy_request(
     match target.protocol {
         UpstreamProtocol::Responses => passthrough_responses_request(target, body).await,
         UpstreamProtocol::ChatCompletions => chat_completions_responses_request(target, body).await,
-        UpstreamProtocol::AnthropicMessages => anthropic_messages_responses_request(target, body).await,
+        UpstreamProtocol::AnthropicMessages => {
+            anthropic_messages_responses_request(target, body).await
+        }
     }
 }
 
@@ -141,7 +143,9 @@ async fn passthrough_responses_request(
     proxy_http_response_from_reqwest(response).await
 }
 
-async fn passthrough_models_request(target: &ActiveProxyTarget) -> anyhow::Result<ProxyHttpResponse> {
+async fn passthrough_models_request(
+    target: &ActiveProxyTarget,
+) -> anyhow::Result<ProxyHttpResponse> {
     let mut request = reqwest::Client::new().get(models_url(&target.base_url));
     if !target.api_key.trim().is_empty() {
         request = request.bearer_auth(target.api_key.trim());
@@ -1579,16 +1583,14 @@ impl AnthropicSseState {
                     if let Some(created_at) = message.get("created_at").and_then(Value::as_str) {
                         self.created_at = parse_iso8601_timestamp(created_at).unwrap_or(0);
                     }
-                    self.latest_usage = Some(anthropic_usage_to_responses_usage(message.get("usage")));
+                    self.latest_usage =
+                        Some(anthropic_usage_to_responses_usage(message.get("usage")));
                 }
                 self.ensure_response_started_into(output);
             }
             "content_block_start" => {
                 self.ensure_response_started_into(output);
-                let index = chunk
-                    .get("index")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as usize;
+                let index = chunk.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
                 let block = chunk.get("content_block").unwrap_or(&Value::Null);
                 let block_type = block
                     .get("type")
@@ -1645,10 +1647,7 @@ impl AnthropicSseState {
             }
             "content_block_delta" => {
                 self.ensure_response_started_into(output);
-                let index = chunk
-                    .get("index")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as usize;
+                let index = chunk.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
                 let delta = chunk.get("delta").unwrap_or(&Value::Null);
                 if let Some(state) = self.active_blocks.get_mut(&index) {
                     match delta.get("type").and_then(Value::as_str).unwrap_or("") {
@@ -1689,10 +1688,7 @@ impl AnthropicSseState {
                 }
             }
             "content_block_stop" => {
-                let index = chunk
-                    .get("index")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as usize;
+                let index = chunk.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
                 if let Some(state) = self.active_blocks.get_mut(&index) {
                     match state.block_type.as_str() {
                         "thinking" => self.finalize_reasoning_into(output),
@@ -2199,7 +2195,8 @@ fn append_responses_item_as_anthropic(
         _ => {
             flush_anthropic_tool_calls(messages, pending_assistant_tool_calls);
             if item.get("role").is_some() || item.get("content").is_some() {
-                let role = responses_role_to_anthropic_role(item.get("role").and_then(Value::as_str));
+                let role =
+                    responses_role_to_anthropic_role(item.get("role").and_then(Value::as_str));
                 let content = responses_content_to_anthropic_content(
                     item.get("content").unwrap_or(&Value::Null),
                 );
@@ -2252,7 +2249,10 @@ fn flush_tool_calls(
     messages.push(message);
 }
 
-fn flush_anthropic_tool_calls(messages: &mut Vec<Value>, pending_assistant_tool_calls: &mut Vec<Value>) {
+fn flush_anthropic_tool_calls(
+    messages: &mut Vec<Value>,
+    pending_assistant_tool_calls: &mut Vec<Value>,
+) {
     if pending_assistant_tool_calls.is_empty() {
         return;
     }
@@ -2768,17 +2768,17 @@ fn unix_timestamp_utc(
     let year_i = year as i64;
     let adjusted_year = year_i - ((14 - month_i) / 12);
     let adjusted_month = month_i + 12 * ((14 - month_i) / 12) - 3;
-    let julian_day = day_i
-        + ((153 * adjusted_month + 2) / 5)
-        + 365 * adjusted_year
-        + adjusted_year / 4
-        - adjusted_year / 100
-        + adjusted_year / 400
-        - 719_469;
+    let julian_day =
+        day_i + ((153 * adjusted_month + 2) / 5) + 365 * adjusted_year + adjusted_year / 4
+            - adjusted_year / 100
+            + adjusted_year / 400
+            - 719_469;
     if julian_day < 0 {
         return None;
     }
-    Some((julian_day as u64) * 86_400 + (hour as u64) * 3_600 + (minute as u64) * 60 + second as u64)
+    Some(
+        (julian_day as u64) * 86_400 + (hour as u64) * 3_600 + (minute as u64) * 60 + second as u64,
+    )
 }
 
 fn http_status_line(status: u16) -> String {

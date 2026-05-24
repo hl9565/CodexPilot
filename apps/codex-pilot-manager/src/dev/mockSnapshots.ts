@@ -37,6 +37,11 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     configured: true,
     authenticated: true,
     accountLabel: "pilot@example.com",
+    routeLabel: "自动中转（登录态）",
+    statusMessage: "当前按登录态使用自动中转。",
+    degraded: false,
+    officialSnapshotAvailable: true,
+    backupSnapshotAvailable: true,
     profiles: [
       {
         id: "team-relay",
@@ -45,6 +50,7 @@ const commandHandlers: Record<string, MockCommandHandler> = {
         bearerToken: "preview-team-relay-key",
         mode: "hybridApi",
         upstreamProtocol: "responses",
+        authenticatedBehavior: "relay",
       },
       {
         id: "backup-relay",
@@ -53,6 +59,7 @@ const commandHandlers: Record<string, MockCommandHandler> = {
         bearerToken: "preview-backup-relay-key",
         mode: "api",
         upstreamProtocol: "chatCompletions",
+        authenticatedBehavior: "officialDirect",
       },
     ],
     activeProfileId: "team-relay",
@@ -171,6 +178,10 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     },
     message: "预览模式：已导入 2 个 CCSwitch 配置，跳过 1 个，重命名 1 个。",
   }),
+  import_official_snapshot_from_backup: () => ({
+    message: "预览模式：已从备份导入官方原版快照。",
+    provider: commandHandlers.provider_snapshot(),
+  }),
   sync_provider_sessions: () => "预览模式：Provider Sync 完成，目标 CodexPilot，会话文件 18 个，数据库行 19 条。",
   restore_recycle_bin_entries: () => ({
     message: "预览模式：已恢复所选会话",
@@ -182,6 +193,81 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     succeededTokens: ["preview-token-restore", "preview-token-missing"],
     failed: [],
   }),
+  export_session_zip: () => ({
+    zipPath: "/Users/huanglin/.codex/backups_state/session-zip/codex-sessions-backup-1748073600.zip",
+    manifest: {
+      version: 1,
+      product: "CodexPilot",
+      exportedAt: "1748073600000",
+      exportedAtMs: 1748073600000,
+      includes: {
+        sessions: true,
+        archivedSessions: true,
+        stateSqlite: true,
+      },
+      counts: {
+        sessionFiles: 128,
+        archivedSessionFiles: 14,
+      },
+    },
+  }),
+  pick_session_zip_save_path: () => "/Users/huanglin/Downloads/codex-sessions-backup-demo.zip",
+  pick_session_zip_file: () => "/Users/huanglin/Downloads/codex-sessions-backup-demo.zip",
+  inspect_session_zip: () => ({
+    zipPath: "/Users/huanglin/Downloads/codex-sessions-backup-demo.zip",
+    manifest: {
+      version: 1,
+      product: "CodexPilot",
+      exportedAt: "1748073600000",
+      exportedAtMs: 1748073600000,
+      includes: {
+        sessions: true,
+        archivedSessions: true,
+        stateSqlite: true,
+      },
+      counts: {
+        sessionFiles: 128,
+        archivedSessionFiles: 14,
+      },
+    },
+    entries: {
+      sessions: true,
+      archivedSessions: true,
+      stateSqlite: true,
+    },
+  }),
+  import_session_zip: (args) => {
+    const mode = (args as { request?: { mode?: string } })?.request?.mode ?? "merge";
+    return {
+      mode,
+      manifest: {
+        version: 1,
+        product: "CodexPilot",
+        exportedAt: "1748073600000",
+        exportedAtMs: 1748073600000,
+        includes: {
+          sessions: true,
+          archivedSessions: true,
+          stateSqlite: true,
+        },
+        counts: {
+          sessionFiles: 128,
+          archivedSessionFiles: 14,
+        },
+      },
+      restoredSessionFiles: 128,
+      restoredArchivedSessionFiles: 14,
+      restoredStateSqlite: mode === "overwrite",
+      safetyBackupZipPath:
+        mode === "overwrite"
+          ? "/Users/huanglin/.codex/backups_state/session-zip/codex-sessions-backup-1748077200.zip"
+          : null,
+      message:
+        mode === "overwrite"
+          ? "预览模式：已覆盖恢复 ZIP，并先创建了一份本地安全备份。"
+          : "预览模式：已合并导入 ZIP，state_5.sqlite 保持不变。",
+    };
+  },
   collect_diagnostics: () => "预览模式：诊断快照已生成",
 };
 

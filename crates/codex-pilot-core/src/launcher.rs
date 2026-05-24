@@ -71,7 +71,7 @@ where
 pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
     let app_dir = crate::app_paths::resolve_codex_app_dir(options.app_dir.as_deref())
         .ok_or_else(|| anyhow::anyhow!("Codex App directory not found"))?;
-    let debug_port = crate::ports::select_platform_loopback_port(options.debug_port);
+    let debug_port = options.debug_port;
     if helper_status(options.helper_port).await.is_ok() {
         let _ = crate::diagnostic_log::append(
             "launcher.helper_already_running_skip_inject",
@@ -123,6 +123,18 @@ pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
         );
         anyhow::bail!(
             "Codex is already running without a reachable debug port. Restart Codex from CodexPilot before trying again."
+        );
+    }
+    if !crate::ports::can_bind_loopback_port(debug_port) {
+        let _ = crate::diagnostic_log::append(
+            "launcher.debug_port_unavailable",
+            serde_json::json!({
+                "debug_port": debug_port,
+                "helper_port": helper_port
+            }),
+        );
+        anyhow::bail!(
+            "调试端口 {debug_port} 已被占用，无法启动 Codex。请先关闭占用该端口的进程，或在启动设置里更换调试端口。"
         );
     }
     let _ = crate::diagnostic_log::append(
@@ -271,10 +283,8 @@ pub async fn inject_running_codex(debug_port: u16, helper_port: u16) -> anyhow::
             Err(error) => {
                 last_error = Some(error);
                 if attempt + 1 < INJECTION_MAX_ATTEMPTS {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        INJECTION_RETRY_DELAY_MS,
-                    ))
-                    .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(INJECTION_RETRY_DELAY_MS))
+                        .await;
                 }
             }
         }
@@ -312,5 +322,16 @@ mod tests {
         assert_eq!(command[0], "open");
         assert!(command.contains(&"-n".to_string()));
         assert!(command.contains(&"--remote-debugging-port=9688".to_string()));
+    }
+
+    #[test]
+    fn launch_options_keep_requested_debug_port() {
+        let options = LaunchOptions {
+            app_dir: None,
+            debug_port: 9688,
+            helper_port: 58888,
+        };
+
+        assert_eq!(options.debug_port, 9688);
     }
 }

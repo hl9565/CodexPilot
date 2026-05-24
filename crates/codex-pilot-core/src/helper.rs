@@ -67,8 +67,9 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> anyhow::Result<
         return Ok(());
     }
 
-    let (status, content_type, body) =
-        if path == "/backend/status" && matches!(method, "GET" | "POST") {
+    let (status, content_type, body) = if path == "/backend/status"
+        && matches!(method, "GET" | "POST")
+    {
         (
             "200 OK".to_string(),
             "application/json; charset=utf-8".to_string(),
@@ -250,7 +251,9 @@ fn load_active_proxy_target() -> anyhow::Result<Option<crate::protocol_proxy::Ac
         .unwrap_or_default();
     let profile = profiles
         .iter()
-        .find(|profile| profile.get("id").and_then(serde_json::Value::as_str) == Some(active_profile_id))
+        .find(|profile| {
+            profile.get("id").and_then(serde_json::Value::as_str) == Some(active_profile_id)
+        })
         .or_else(|| profiles.first());
     let Some(profile) = profile else {
         return Ok(None);
@@ -294,10 +297,10 @@ fn load_active_proxy_target() -> anyhow::Result<Option<crate::protocol_proxy::Ac
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol_proxy::{RouteMode, UpstreamProtocol};
     use serde_json::json;
     use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
-    use crate::protocol_proxy::{RouteMode, UpstreamProtocol};
 
     fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -308,8 +311,7 @@ mod tests {
     }
 
     fn unique_temp_dir(name: &str) -> PathBuf {
-        static COUNTER: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         std::env::temp_dir().join(format!(
             "codex-pilot-helper-{name}-{}-{}-{}",
             std::process::id(),

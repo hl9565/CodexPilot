@@ -23,6 +23,7 @@ import {
   Network,
   RotateCcw,
   Plus,
+  CircleHelp,
 } from "lucide-react";
 import { callBackend, isUiPreviewMode } from "./backend";
 import { resolveAutoLaunchAction } from "./autoLaunch";
@@ -61,6 +62,11 @@ type ProviderSnapshot = {
   configured: boolean;
   authenticated: boolean;
   accountLabel: string | null;
+  routeLabel: string;
+  statusMessage: string;
+  degraded: boolean;
+  officialSnapshotAvailable: boolean;
+  backupSnapshotAvailable: boolean;
   profiles: ProviderProfile[];
   activeProfileId: string;
 };
@@ -80,10 +86,12 @@ type ProviderProfile = {
   bearerToken: string;
   mode: ProviderProfileMode;
   upstreamProtocol: UpstreamProtocol;
+  authenticatedBehavior: AuthenticatedBehavior;
 };
 
 type RunMode = "official" | "hybridApi" | "api";
 type ProviderProfileMode = "hybridApi" | "api";
+type AuthenticatedBehavior = "relay" | "officialDirect";
 type UpstreamProtocol = "responses" | "chatCompletions" | "anthropicMessages";
 type Theme = "light" | "dark";
 
@@ -92,6 +100,27 @@ const THEME_STORAGE_KEY = "codex-pilot-theme";
 type ProviderProfileSaveResponse = {
   id: string;
   message: string;
+};
+
+type OfficialSnapshotImportResult = {
+  message: string;
+  provider: ProviderSnapshot;
+};
+
+type OfficialSnapshotPrepareResult = {
+  message: string;
+  provider: ProviderSnapshot;
+};
+
+type ProviderProfileSaveRequest = {
+  id: string | null;
+  name: string;
+  baseUrl: string;
+  bearerToken: string;
+  mode: ProviderProfileMode;
+  upstreamProtocol: UpstreamProtocol;
+  authenticatedBehavior: AuthenticatedBehavior;
+  activate: boolean;
 };
 
 type CcsImportResult = {
@@ -159,6 +188,49 @@ type RecycleBinBatchResponse = {
   }>;
 };
 
+type SessionZipManifest = {
+  version: number;
+  product: string;
+  exportedAt: string;
+  exportedAtMs: number;
+  includes: {
+    sessions: boolean;
+    archivedSessions: boolean;
+    stateSqlite: boolean;
+  };
+  counts: {
+    sessionFiles: number;
+    archivedSessionFiles: number;
+  };
+};
+
+type SessionZipExportResult = {
+  zipPath: string;
+  manifest: SessionZipManifest;
+};
+
+type SessionZipInspectResult = {
+  zipPath: string;
+  manifest: SessionZipManifest;
+  entries: {
+    sessions: boolean;
+    archivedSessions: boolean;
+    stateSqlite: boolean;
+  };
+};
+
+type SessionZipImportMode = "merge" | "overwrite";
+
+type SessionZipImportResult = {
+  mode: SessionZipImportMode;
+  manifest: SessionZipManifest;
+  restoredSessionFiles: number;
+  restoredArchivedSessionFiles: number;
+  restoredStateSqlite: boolean;
+  safetyBackupZipPath: string | null;
+  message: string;
+};
+
 type EnhancementSettings = {
   enabled: boolean;
   timeline: boolean;
@@ -203,6 +275,7 @@ function App() {
   const [launching, setLaunching] = React.useState(false);
   const autoLaunchAttemptedRef = React.useRef(false);
   const autoLaunchFailedRef = React.useRef(false);
+  const launchRequestIdRef = React.useRef(0);
 
   const notify = React.useCallback((value: string) => {
     setMessage(value);
@@ -289,23 +362,44 @@ function App() {
       if (action.message) notify(action.message);
       return;
     }
+    const requestId = ++launchRequestIdRef.current;
     setLaunching(true);
     setProgressMessage(action.progress);
     notify(action.message);
     callBackend<string>(action.command)
       .then((value) => {
+        if (requestId !== launchRequestIdRef.current) return;
         notify(value);
         refresh(true);
       })
       .catch((error) => {
+        if (requestId !== launchRequestIdRef.current) return;
         autoLaunchFailedRef.current = true;
         notify(String(error));
       })
       .finally(() => {
+        if (requestId !== launchRequestIdRef.current) return;
         setLaunching(false);
         setProgressMessage("");
       });
   }, [launch, launching, notify, refresh]);
+
+  React.useEffect(() => {
+    if (!launching || !launch || !progressMessage) return;
+    const startingCodex =
+      progressMessage.includes("启动 Codex") || progressMessage.includes("启动中");
+    if (!startingCodex) return;
+    if (launch.actionKind !== "reinject" && launch.actionKind !== "running") return;
+
+    launchRequestIdRef.current += 1;
+    setLaunching(false);
+    setProgressMessage("");
+    notify(
+      launch.actionKind === "running"
+        ? "CodexPilot 已连接。"
+        : "Codex 已启动，但 CodexPilot 还没接上；现在可以直接重新注入。"
+    );
+  }, [launch, launching, progressMessage, notify]);
 
   const handleLaunch = () => {
     if (launching) return;
@@ -332,16 +426,22 @@ function App() {
         : actionKind === "restart"
           ? "正在重启 Codex"
           : "正在启动 Codex";
+    const requestId = ++launchRequestIdRef.current;
     setLaunching(true);
     setProgressMessage(progress);
     notify(progress);
     callBackend<string>(command)
       .then((value) => {
+        if (requestId !== launchRequestIdRef.current) return;
         notify(value);
         refresh();
       })
-      .catch((error) => notify(String(error)))
+      .catch((error) => {
+        if (requestId !== launchRequestIdRef.current) return;
+        notify(String(error));
+      })
       .finally(() => {
+        if (requestId !== launchRequestIdRef.current) return;
         setLaunching(false);
         setProgressMessage("");
       });
@@ -471,6 +571,10 @@ function OverviewView({
   const backendState = backendStatusLabel(status);
   const providerMode = runModeLabel(provider?.mode ?? "official");
   const displayVersion = appVersion ?? status?.version ?? "未知";
+  const providerSummaryTitle = provider?.profile ?? "默认中转";
+  const providerSummaryDetail = provider?.degraded
+    ? "已检测到官方登录，但还没有可用恢复点，所以当前暂时按自动中转生效。"
+    : provider?.statusMessage ?? "系统会根据官方登录和恢复点自动决定当前怎么生效。";
 
   return (
     <div className="taskStack">
@@ -494,7 +598,7 @@ function OverviewView({
           <Metric label="后端" value={backendState} />
           <Metric label="Codex 应用" value={launch?.appPath ? "已发现" : "未发现"} />
           <Metric label="调试端口" value={String(launch?.debugPort ?? "-")} />
-          <Metric label="后端端口" value={String(launch?.helperPort ?? "-")} />
+          <Metric label="连接端口" value={String(launch?.helperPort ?? "-")} />
           <Metric label="版本" value={displayVersion} />
         </dl>
         <div className="taskFooter">
@@ -511,41 +615,34 @@ function OverviewView({
               <span className="titleIcon">
                 <LogIn size={16} />
               </span>
-              <h2>模型通道</h2>
+              <h2>当前配置档</h2>
             </div>
-            <p className="taskSummary">当前请求路由与登录状态，详细 API 配置在模型通道页维护。</p>
+            <p className="taskSummary">系统会根据官方登录和恢复点自动决定当前怎么生效，详细维护在配置档页面。</p>
           </div>
-          <button className="secondary" onClick={() => onNavigate("provider")} type="button">选择通道</button>
+          <button className="secondary" onClick={() => onNavigate("provider")} type="button">管理配置档</button>
         </div>
         <div className="providerOverviewBody">
-          <div className="channelChoiceSummary">
-            <div className="segmentedPreview">
-              <span className={provider?.mode === "api" ? "active" : ""}>传统中转</span>
-              <span className={provider?.mode === "hybridApi" ? "active" : ""}>混合中转</span>
-              <span className={provider?.mode === "official" ? "active" : ""}>官方通道</span>
-            </div>
-            <p className="channelModeCopy">
-              {provider?.mode === "official"
-                ? "使用 Codex/ChatGPT 官方登录，不写入自定义模型供应商。"
-                : provider?.mode === "api"
-                  ? "不依赖 Codex/ChatGPT 登录，直接使用当前 API 配置。"
-                  : "保留 Codex/ChatGPT 登录，把模型请求转到当前 API 配置。"}
-            </p>
-            <p>账号：{provider?.accountLabel ?? "未读取到账号信息"}</p>
-            <p>当前配置：{provider?.profile ?? "官方通道"}</p>
+          <div className={`providerSummaryCard ${provider?.degraded ? "warning" : ""}`}>
+            <span className="providerSummaryLabel">当前使用</span>
+            <strong>{providerSummaryTitle}</strong>
+            <p>{providerSummaryDetail}</p>
           </div>
-          <div className="profileOverviewGrid">
-            <div className="fieldLine">
-              <span>通道</span>
-              <strong>{providerMode}</strong>
-            </div>
-            <div className="fieldLine">
+          <div className="providerSummaryGrid">
+            <div className="summaryMetric">
               <span>官方登录</span>
               <strong>{provider?.authenticated ? "已检测" : "未检测"}</strong>
             </div>
-            <div className="fieldLine">
+            <div className="summaryMetric">
+              <span>官方恢复点</span>
+              <strong>{provider?.officialSnapshotAvailable ? "已准备" : "未准备"}</strong>
+            </div>
+            <div className="summaryMetric">
               <span>配置档</span>
-              <strong>{provider?.profile ?? "官方通道"}</strong>
+              <strong>{providerSummaryTitle}</strong>
+            </div>
+            <div className="summaryMetric">
+              <span>账号</span>
+              <strong>{provider?.accountLabel ?? "未读取到账号信息"}</strong>
             </div>
           </div>
         </div>
@@ -813,9 +910,9 @@ function LaunchView({
           <Row label="Codex 应用" value={launch?.appPath ?? "未发现"} />
           <Row label="偏好路径" value={launch?.requestedAppPath || "自动探测"} />
           <Row label="调试端口" value={String(launch?.debugPort ?? "-")} />
-          <Row label="后端端口" value={String(launch?.helperPort ?? "-")} />
+          <Row label="连接端口" value={String(launch?.helperPort ?? "-")} />
           <Row label="调试端口状态" value={launch?.debugReachable ? "可连接" : "未连接"} />
-          <Row label="后端端口状态" value={launch?.helperReachable ? "可连接" : "未连接"} />
+          <Row label="连接服务状态" value={launch?.helperReachable ? "可连接" : "未连接"} />
         </div>
         <pre className="commandBlock">
           {launch?.commandPreview.length ? launch.commandPreview.join(" ") : "暂无启动命令"}
@@ -870,22 +967,21 @@ function ProviderView({
   const profiles = provider?.profiles ?? [];
   const activeProfileId = provider?.activeProfileId || profiles[0]?.id || "";
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0] ?? null;
-  const snapshotMode = provider?.mode ?? "official";
-  const [selectedChannel, setSelectedChannel] = React.useState<RunMode>(snapshotMode);
-  const customChannelSelected = selectedChannel !== "official";
   const [editingId, setEditingId] = React.useState("");
   const [profileName, setProfileName] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [bearerToken, setBearerToken] = React.useState("");
   const [upstreamProtocol, setUpstreamProtocol] = React.useState<UpstreamProtocol>("responses");
+  const [authenticatedBehavior, setAuthenticatedBehavior] = React.useState<AuthenticatedBehavior>("relay");
   const [showToken, setShowToken] = React.useState(false);
   const [isCreatingProfile, setIsCreatingProfile] = React.useState(false);
   const [pendingAction, setPendingAction] = React.useState("");
-  const [pendingChannel, setPendingChannel] = React.useState<RunMode | null>(null);
   const [refreshingCcs, setRefreshingCcs] = React.useState(false);
   const [importingCcs, setImportingCcs] = React.useState(false);
+  const [importingOfficialSnapshot, setImportingOfficialSnapshot] = React.useState(false);
+  const [preparingOfficialSnapshot, setPreparingOfficialSnapshot] = React.useState(false);
+  const [showOfficialSnapshotHelp, setShowOfficialSnapshotHelp] = React.useState(false);
   const [pendingDeleteId, setPendingDeleteId] = React.useState("");
-  const currentMode = snapshotMode;
   const editingProfile = profiles.find((profile) => profile.id === editingId) ?? null;
   const visibleProfiles: ProviderProfile[] = isCreatingProfile
     ? [{
@@ -895,12 +991,9 @@ function ProviderView({
         bearerToken,
         mode: activeProfile?.mode ?? "hybridApi",
         upstreamProtocol,
+        authenticatedBehavior,
       }]
     : profiles;
-
-  React.useEffect(() => {
-    setSelectedChannel(snapshotMode);
-  }, [snapshotMode]);
 
   React.useEffect(() => {
     if (isCreatingProfile || !editingProfile) return;
@@ -908,6 +1001,7 @@ function ProviderView({
     setBaseUrl(editingProfile.baseUrl);
     setBearerToken(editingProfile.bearerToken);
     setUpstreamProtocol(editingProfile.upstreamProtocol ?? "responses");
+    setAuthenticatedBehavior(editingProfile.authenticatedBehavior ?? "relay");
   }, [editingProfile?.id, isCreatingProfile]);
 
   const saveProfile = () => {
@@ -927,6 +1021,7 @@ function ProviderView({
         bearerToken,
         mode: editingProfile?.mode ?? activeProfile?.mode ?? "hybridApi",
         upstreamProtocol,
+        authenticatedBehavior,
         activate: !editingId && !activeProfile,
       },
     })
@@ -943,52 +1038,20 @@ function ProviderView({
       });
   };
 
-  const applyChannel = (mode: RunMode) => {
-    if (pendingAction || pendingChannel === mode) return;
-    if (mode !== "official" && !activeProfile?.id) {
-      onMessage("请先选择一个可用配置档");
-      return;
-    }
-    setPendingChannel(mode);
-    onProgress(`正在切换${runModeLabel(mode)}`);
-    onMessage(`正在切换${runModeLabel(mode)}`);
-    const request =
-      mode === "official"
-        ? callBackend<string>("clear_provider")
-        : callBackend<string>("apply_provider", {
-            request: {
-              profileId: activeProfile?.id,
-              mode,
-            },
-          });
-    request
-      .then((message) => {
-        onMessage(message);
-        setSelectedChannel(mode);
-        onRefresh();
-      })
-      .catch((error) => {
-        onMessage(String(error));
-        setSelectedChannel(snapshotMode);
-      })
-      .finally(() => {
-        setPendingChannel(null);
-        onProgress("");
-      });
-  };
-
   const newProfile = () => {
     setEditingId("");
     setProfileName("新通道");
     setBaseUrl("");
     setBearerToken("");
     setUpstreamProtocol("responses");
+    setAuthenticatedBehavior("relay");
     setShowToken(false);
     setPendingDeleteId("");
     setIsCreatingProfile(true);
   };
 
   const selectProfile = (profile: ProviderProfile) => {
+    onProgress("正在应用配置档");
     callBackend<string>("activate_provider_profile", { request: { id: profile.id } })
       .then((message) => {
         setIsCreatingProfile(false);
@@ -996,7 +1059,8 @@ function ProviderView({
         onMessage(message);
         onRefresh();
       })
-      .catch((error) => onMessage(String(error)));
+      .catch((error) => onMessage(String(error)))
+      .finally(() => onProgress(""));
   };
 
   const startEditingProfile = (profile: ProviderProfile) => {
@@ -1005,6 +1069,7 @@ function ProviderView({
     setBaseUrl(profile.baseUrl);
     setBearerToken(profile.bearerToken);
     setUpstreamProtocol(profile.upstreamProtocol ?? "responses");
+    setAuthenticatedBehavior(profile.authenticatedBehavior ?? "relay");
     setShowToken(false);
     setPendingDeleteId("");
     setIsCreatingProfile(false);
@@ -1067,6 +1132,38 @@ function ProviderView({
     setPendingDeleteId("");
   };
 
+  const importOfficialSnapshot = () => {
+    if (importingOfficialSnapshot) return;
+    setImportingOfficialSnapshot(true);
+    onProgress("正在导入官方原版快照");
+    callBackend<OfficialSnapshotImportResult>("import_official_snapshot_from_backup")
+      .then((result) => {
+        onMessage(result.message);
+        onRefresh();
+      })
+      .catch((error) => onMessage(String(error)))
+      .finally(() => {
+        setImportingOfficialSnapshot(false);
+        onProgress("");
+      });
+  };
+
+  const prepareOfficialSnapshotAfterClearingRelay = () => {
+    if (preparingOfficialSnapshot) return;
+    setPreparingOfficialSnapshot(true);
+    onProgress("正在停止中转并准备官方原版恢复点");
+    callBackend<OfficialSnapshotPrepareResult>("prepare_official_snapshot_after_clearing_relay")
+      .then((result) => {
+        onMessage(result.message);
+        onRefresh();
+      })
+      .catch((error) => onMessage(String(error)))
+      .finally(() => {
+        setPreparingOfficialSnapshot(false);
+        onProgress("");
+      });
+  };
+
   return (
     <div className="providerLayout">
       <section className="panel widePanel statusPanel">
@@ -1082,89 +1179,94 @@ function ProviderView({
             <span>官方登录</span>
             <strong>{provider?.authenticated ? "已检测" : "未检测"}</strong>
           </div>
-          <Metric label="当前通道" value={runModeLabel(currentMode)} />
+          <Metric label="当前方式" value={provider?.routeLabel ?? "自动中转"} />
           <Metric label="配置档" value={provider?.profile ?? "默认"} />
           <Metric label="已配置" value={provider?.configured ? "是" : "否"} />
+          <div className="recoveryMetric">
+            <div className="recoveryMetricHeader">
+              <span>官方恢复点</span>
+              <button
+                aria-expanded={showOfficialSnapshotHelp}
+                className="helpIconButton"
+                onClick={() => setShowOfficialSnapshotHelp((value) => !value)}
+                type="button"
+              >
+                <CircleHelp size={14} />
+              </button>
+            </div>
+            <strong>{provider?.officialSnapshotAvailable ? "已准备" : "未准备"}</strong>
+          </div>
         </div>
         <div className="accountLine">
           <span className={`statusDot ${provider?.authenticated ? "ok" : "warning"}`} />
           <span>登录账号</span>
           <strong>{provider?.accountLabel ?? "未读取到账号信息"}</strong>
         </div>
+        {!provider?.officialSnapshotAvailable && showOfficialSnapshotHelp ? (
+          <div className="helpPopover">
+            <p>官方原版恢复点用于在登录态下切回官方原版。</p>
+            <p>当前还没有可用恢复点，不影响现在继续使用自动中转。</p>
+            <p>你可以从历史备份导入，或先停止中转后再准备恢复点。</p>
+            <div className="noticeActions">
+              {provider?.backupSnapshotAvailable ? (
+                <button
+                  className="secondary"
+                  disabled={importingOfficialSnapshot || preparingOfficialSnapshot}
+                  onClick={importOfficialSnapshot}
+                  type="button"
+                >
+                  {importingOfficialSnapshot ? "导入中" : "从备份导入"}
+                </button>
+              ) : null}
+              <button
+                className="secondary"
+                disabled={preparingOfficialSnapshot || importingOfficialSnapshot}
+                onClick={prepareOfficialSnapshotAfterClearingRelay}
+                type="button"
+              >
+                {preparingOfficialSnapshot ? "准备中" : "停止中转后准备"}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
-      <section className="panel widePanel modePanel">
+      <section className="panel widePanel profilePanel">
         <div className="panelHeader">
-          <div className="panelTitle compactTitle">
-            <LogIn size={16} />
-            <h2>选择通道</h2>
+          <div className="panelTitle">
+            <Network size={16} />
+            <h2>配置档</h2>
           </div>
           <code>{provider?.authPath ?? "~/.codex/auth.json"}</code>
         </div>
-        <div className="modeGrid">
-          <ModeCard
-            active={selectedChannel === "api"}
-            description="不依赖 Codex/ChatGPT 登录，直接使用当前 API 配置。"
-            disabled={Boolean(pendingAction || pendingChannel)}
-            icon={Bot}
-            onClick={() => applyChannel("api")}
-            title="传统中转"
-          />
-          <ModeCard
-            active={selectedChannel === "hybridApi"}
-            description="保留 Codex/ChatGPT 登录，把 Codex 请求转换后转到当前上游 API 配置。"
-            disabled={Boolean(pendingAction || pendingChannel)}
-            icon={Network}
-            onClick={() => applyChannel("hybridApi")}
-            title="混合中转"
-          />
-          <ModeCard
-            active={selectedChannel === "official"}
-            description="使用 Codex/ChatGPT 官方登录，不写入自定义模型供应商。"
-            disabled={Boolean(pendingAction || pendingChannel)}
-            icon={BadgeCheck}
-            onClick={() => applyChannel("official")}
-            title="官方通道"
-          />
-        </div>
-      </section>
-
-      {customChannelSelected ? (
-        <section className="panel widePanel profilePanel">
-          <div className="panelHeader">
-            <div className="panelTitle">
-              <Network size={16} />
-              <h2>配置档</h2>
+        <div className="profileList">
+          <div className="ccsImportRow">
+            <div className="ccsImportMeta">
+              <strong>CCSwitch 配置</strong>
+              <span>{ccsProviderSummary(ccsProvider)}</span>
+            </div>
+            <div className="ccsImportActions">
+              <button
+                className="secondary"
+                disabled={refreshingCcs || importingCcs}
+                onClick={refreshCcsProviders}
+                type="button"
+              >
+                <RefreshCw size={16} />
+                {refreshingCcs ? "刷新中" : "刷新"}
+              </button>
+              <button
+                className="secondary"
+                disabled={Boolean(refreshingCcs || importingCcs || !ccsProvider?.importableCount)}
+                onClick={importCcsProviders}
+                type="button"
+              >
+                <Download size={16} />
+                {importingCcs ? "导入中" : "导入"}
+              </button>
             </div>
           </div>
-          <div className="profileList">
-            <div className="ccsImportRow">
-              <div className="ccsImportMeta">
-                <strong>CCSwitch 配置</strong>
-                <span>{ccsProviderSummary(ccsProvider)}</span>
-              </div>
-              <div className="ccsImportActions">
-                <button
-                  className="secondary"
-                  disabled={refreshingCcs || importingCcs}
-                  onClick={refreshCcsProviders}
-                  type="button"
-                >
-                  <RefreshCw size={16} />
-                  {refreshingCcs ? "刷新中" : "刷新"}
-                </button>
-                <button
-                  className="secondary"
-                  disabled={Boolean(refreshingCcs || importingCcs || !ccsProvider?.importableCount)}
-                  onClick={importCcsProviders}
-                  type="button"
-                >
-                  <Download size={16} />
-                  {importingCcs ? "导入中" : "导入"}
-                </button>
-              </div>
-            </div>
-            {visibleProfiles.map((profile) => {
+          {visibleProfiles.map((profile) => {
               const selected = isCreatingProfile ? !profile.id : profile.id === activeProfileId;
               const editing = !isCreatingProfile && profile.id === editingId;
               return (
@@ -1202,7 +1304,7 @@ function ProviderView({
                         {!selected ? (
                           <button
                             className="secondary"
-                            disabled={Boolean(pendingAction || pendingChannel)}
+                            disabled={Boolean(pendingAction)}
                             onClick={() => selectProfile(profile)}
                             type="button"
                           >
@@ -1248,6 +1350,12 @@ function ProviderView({
                           </select>
                         </label>
                       </div>
+                      <SwitchRow
+                        checked={authenticatedBehavior === "officialDirect"}
+                        description="勾选后，存在官方登录态时优先恢复官方原版；没有快照或未登录时会自动退化为中转。"
+                        label="登录态存在时改走官方原版"
+                        onChange={(checked) => setAuthenticatedBehavior(checked ? "officialDirect" : "relay")}
+                      />
                       {upstreamProtocol === "chatCompletions" ? (
                         <div className="officialBox">
                           <strong>本地协议转换</strong>
@@ -1269,57 +1377,12 @@ function ProviderView({
                 </div>
               );
             })}
-            <button className="addProfile" onClick={newProfile} title="新增配置" type="button">
-              <Plus size={18} />
-            </button>
-          </div>
-        </section>
-      ) : (
-        <section className="panel widePanel officialPanel">
-          <div className="panelHeader">
-            <div className="panelTitle">
-              <BadgeCheck size={16} />
-              <h2>官方通道</h2>
+          <button className="addProfile" onClick={newProfile} title="新增配置" type="button">
+            <Plus size={18} />
+          </button>
+        </div>
+      </section>
             </div>
-          </div>
-          <div className="officialBox">
-            <strong>使用 Codex/ChatGPT 官方登录</strong>
-            <span>不会写入 CodexPilot 模型供应商，也不会使用自定义 API 配置。</span>
-          </div>
-        </section>
-      )}
-            </div>
-  );
-}
-
-function ModeCard({
-  active,
-  description,
-  disabled,
-  icon: Icon,
-  onClick,
-  title,
-}: {
-  active: boolean;
-  description: string;
-  disabled: boolean;
-  icon: React.ElementType;
-  onClick: () => void;
-  title: string;
-}) {
-  return (
-    <button
-      className={`modeCard ${active ? "active" : ""}`}
-      disabled={disabled}
-      onClick={onClick}
-      type="button"
-    >
-      <span className="modeIcon">
-        <Icon size={18} />
-      </span>
-      <strong>{title}</strong>
-      <span>{description}</span>
-    </button>
   );
 }
 
@@ -1357,6 +1420,10 @@ function RecycleBinView({
   const entries = recycleBin?.entries ?? [];
   const [selected, setSelected] = React.useState<string[]>([]);
   const [pendingAction, setPendingAction] = React.useState("");
+  const [zipBusy, setZipBusy] = React.useState<"" | "export" | "inspect" | "import">("");
+  const [zipInspect, setZipInspect] = React.useState<SessionZipInspectResult | null>(null);
+  const [zipImportMode, setZipImportMode] = React.useState<SessionZipImportMode | "">("");
+  const [zipOverwriteConfirm, setZipOverwriteConfirm] = React.useState(false);
   const [syncSnapshot, setSyncSnapshot] = React.useState<ProviderSyncSnapshot | null>(null);
   const [syncTarget, setSyncTarget] = React.useState("CodexPilot");
   const [customSyncTarget, setCustomSyncTarget] = React.useState("");
@@ -1394,6 +1461,10 @@ function RecycleBinView({
   React.useEffect(() => {
     setSyncConfirming(false);
   }, [selectedSyncTarget]);
+
+  React.useEffect(() => {
+    setZipOverwriteConfirm(false);
+  }, [zipImportMode, zipInspect?.zipPath]);
 
   const toggleAll = () => {
     setSelected(allSelected ? [] : entries.map((entry) => entry.token));
@@ -1444,6 +1515,89 @@ function RecycleBinView({
       .catch((error) => onMessage(String(error)))
       .finally(() => {
         setPendingAction("");
+        onProgress("");
+      });
+  };
+
+  const exportSessionZip = () => {
+    if (zipBusy) return;
+    setZipBusy("export");
+    onProgress("正在选择并导出对话 ZIP");
+    onMessage("请选择 ZIP 保存位置");
+    callBackend<string | null>("pick_session_zip_save_path")
+      .then((path) => {
+        if (!path) {
+          onMessage("已取消导出 ZIP");
+          return null;
+        }
+        onProgress("正在导出对话 ZIP");
+        onMessage("正在导出当前本地对话库");
+        return callBackend<SessionZipExportResult>("export_session_zip", {
+          request: {
+            zipPath: path,
+          },
+        });
+      })
+      .then((result) => {
+        if (!result) return;
+        onMessage(`导出完成：${result.zipPath}`);
+      })
+      .catch((error) => onMessage(String(error)))
+      .finally(() => {
+        setZipBusy("");
+        onProgress("");
+      });
+  };
+
+  const pickAndInspectSessionZip = () => {
+    if (zipBusy) return;
+    setZipBusy("inspect");
+    onProgress("正在选择并检查 ZIP");
+    callBackend<string | null>("pick_session_zip_file")
+      .then((path) => {
+        if (!path) {
+          onMessage("已取消选择 ZIP");
+          return null;
+        }
+        return callBackend<SessionZipInspectResult>("inspect_session_zip", { zipPath: path });
+      })
+      .then((result) => {
+        if (!result) return;
+        setZipInspect(result);
+        setZipImportMode("");
+        onMessage(`已读取 ZIP：${result.zipPath}`);
+      })
+      .catch((error) => onMessage(String(error)))
+      .finally(() => {
+        setZipBusy("");
+        onProgress("");
+      });
+  };
+
+  const runSessionZipImport = () => {
+    if (!zipInspect || !zipImportMode || zipBusy) return;
+    if (zipImportMode === "overwrite" && !zipOverwriteConfirm) {
+      setZipOverwriteConfirm(true);
+      onMessage("请再确认一次覆盖恢复。执行前会先创建本地安全备份 ZIP。");
+      return;
+    }
+    setZipBusy("import");
+    onProgress(zipImportMode === "merge" ? "正在合并导入 ZIP" : "正在覆盖恢复 ZIP");
+    onMessage(zipImportMode === "merge" ? "正在合并导入对话 ZIP" : "正在覆盖恢复对话 ZIP");
+    callBackend<SessionZipImportResult>("import_session_zip", {
+      request: {
+        zipPath: zipInspect.zipPath,
+        mode: zipImportMode,
+      },
+    })
+      .then((result) => {
+        onMessage(result.message);
+        setZipOverwriteConfirm(false);
+        onRefresh();
+      })
+      .catch((error) => onMessage(String(error)))
+      .finally(() => {
+        setZipBusy("");
         onProgress("");
       });
   };
@@ -1510,6 +1664,13 @@ function RecycleBinView({
     `类型：${schemaLabel(entry.schema)}`,
     `状态：${entry.status || (entry.recoverable ? "可恢复" : "不可恢复")}`,
   ].join("\n");
+
+  const mergeDisabled = !zipInspect || zipBusy === "import";
+  const overwriteDisabled = !zipInspect || zipBusy === "import";
+  const canRunZipImport =
+    Boolean(zipInspect) &&
+    Boolean(zipImportMode) &&
+    (zipImportMode !== "overwrite" || zipOverwriteConfirm);
 
   const syncAction = (() => {
     if (syncBusy) {
@@ -1642,6 +1803,120 @@ function RecycleBinView({
       ) : (
         <p className="bodyText">暂无已删除会话。</p>
       )}
+      <div className="sessionZipInlineBar">
+        <div className="sessionZipInlineCopy">
+          <div className="panelTitle compactTitle">
+            <Download size={15} />
+            <h3>备份与恢复</h3>
+          </div>
+          <p className="formHint">
+            导出当前对话库为 ZIP，或导入已有 ZIP。导入前需要明确选择“合并导入”或“覆盖恢复”。
+          </p>
+        </div>
+        <div className="buttonRow">
+          <button className="secondary" disabled={Boolean(zipBusy)} onClick={pickAndInspectSessionZip} type="button">
+            <Download size={16} />
+            {zipBusy === "inspect" ? "检查中" : "导入 ZIP"}
+          </button>
+          <button className="primary" disabled={Boolean(zipBusy)} onClick={exportSessionZip} type="button">
+            <Download size={16} />
+            {zipBusy === "export" ? "导出中" : "导出 ZIP"}
+          </button>
+        </div>
+      </div>
+      {zipInspect ? (
+        <div className="sessionZipPanel">
+          <div className="zipInspectCard">
+            <div className="zipInspectHeader">
+              <strong>{zipInspect.zipPath}</strong>
+              <span className="pill info">ZIP 已就绪</span>
+            </div>
+            <dl className="metricGrid overviewMetrics">
+              <Metric label="导出时间" value={formatTimestampMs(zipInspect.manifest.exportedAtMs)} />
+              <Metric label="sessions" value={zipInspect.entries.sessions ? `${zipInspect.manifest.counts.sessionFiles} 个文件` : "未包含"} />
+              <Metric
+                label="archived_sessions"
+                value={zipInspect.entries.archivedSessions ? `${zipInspect.manifest.counts.archivedSessionFiles} 个文件` : "未包含"}
+              />
+              <Metric label="state_5.sqlite" value={zipInspect.entries.stateSqlite ? "已包含" : "未包含"} />
+            </dl>
+            <div className="zipModeGrid">
+              <button
+                className={`modeCard ${zipImportMode === "merge" ? "active" : ""}`}
+                disabled={mergeDisabled}
+                onClick={() => setZipImportMode("merge")}
+                type="button"
+              >
+                <strong>合并导入</strong>
+                <span>恢复 ZIP 里的会话文件；不会替换当前 `state_5.sqlite`。</span>
+              </button>
+              <button
+                className={`modeCard dangerMode ${zipImportMode === "overwrite" ? "active" : ""}`}
+                disabled={overwriteDisabled}
+                onClick={() => setZipImportMode("overwrite")}
+                type="button"
+              >
+                <strong>覆盖恢复</strong>
+                <span>按 ZIP 覆盖当前本地会话目录；执行前会先创建一份本地安全备份 ZIP。</span>
+              </button>
+            </div>
+            {zipImportMode === "merge" && (
+              <div className="inlineNotice">
+                <span className="statusDot ok" />
+                <span>
+                  当前选择“合并导入”。即使 ZIP 包含 `state_5.sqlite`，这次也不会导入数据库文件。
+                </span>
+              </div>
+            )}
+            {zipImportMode === "overwrite" && (
+              <div className="overwriteConfirmCard">
+                <div className="inlineNotice warning">
+                  <span className="statusDot warning" />
+                  <span>
+                    当前选择“覆盖恢复”。它会替换当前本地对话目录，并在 ZIP 包含时替换 `state_5.sqlite`。
+                  </span>
+                </div>
+                <label className="checkboxRow compactCheckbox">
+                  <input
+                    checked={zipOverwriteConfirm}
+                    onChange={(event) => setZipOverwriteConfirm(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>我确认执行前先创建本地安全备份，然后再覆盖恢复。</span>
+                </label>
+              </div>
+            )}
+            <div className="buttonRow">
+              <button
+                className={zipImportMode === "overwrite" ? "dangerButton" : "primary"}
+                disabled={!canRunZipImport || zipBusy === "import"}
+                onClick={runSessionZipImport}
+                type="button"
+              >
+                {zipBusy === "import"
+                  ? zipImportMode === "overwrite"
+                    ? "恢复中"
+                    : "导入中"
+                  : zipImportMode === "overwrite"
+                    ? "执行覆盖恢复"
+                    : "执行合并导入"}
+              </button>
+              <button
+                className="secondary"
+                disabled={Boolean(zipBusy)}
+                onClick={() => {
+                  setZipInspect(null);
+                  setZipImportMode("");
+                  setZipOverwriteConfirm(false);
+                }}
+                type="button"
+              >
+                清除当前 ZIP
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
     <section className="panel">
       <div className="panelHeader">
@@ -1910,6 +2185,18 @@ function formatTimestamp(value: number | null) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+function formatTimestampMs(value: number | null) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
   });
 }
 

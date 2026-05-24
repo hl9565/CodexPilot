@@ -92,10 +92,16 @@ fn extract_base_url(config: &Value) -> Option<String> {
 }
 
 fn extract_api_key(config: &Value) -> Option<String> {
-    if let Some(key) = config.pointer("/env/OPENAI_API_KEY").and_then(Value::as_str) {
+    if let Some(key) = config
+        .pointer("/env/OPENAI_API_KEY")
+        .and_then(Value::as_str)
+    {
         return Some(key.to_string());
     }
-    if let Some(key) = config.pointer("/auth/OPENAI_API_KEY").and_then(Value::as_str) {
+    if let Some(key) = config
+        .pointer("/auth/OPENAI_API_KEY")
+        .and_then(Value::as_str)
+    {
         return Some(key.to_string());
     }
     string_at(config, &["apiKey", "api_key"]).or_else(|| {
@@ -120,10 +126,7 @@ fn extract_protocol(config: &Value, base_url: &str) -> UpstreamProtocol {
             return UpstreamProtocol::ChatCompletions;
         }
     }
-    if base_url
-        .to_ascii_lowercase()
-        .ends_with("/chat/completions")
-    {
+    if base_url.to_ascii_lowercase().ends_with("/chat/completions") {
         return UpstreamProtocol::ChatCompletions;
     }
     UpstreamProtocol::Responses

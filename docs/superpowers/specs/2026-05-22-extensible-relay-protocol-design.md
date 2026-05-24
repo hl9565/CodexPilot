@@ -209,7 +209,9 @@ When the active profile uses `upstreamProtocol = responses`:
 - auth handling remains consistent with the selected channel:
   - `混合中转`: `requires_openai_auth = true` plus
     `experimental_bearer_token`
-  - `无账号`: `OPENAI_API_KEY` plus `env_key = "OPENAI_API_KEY"`
+  - `传统中转`: write the CodexPilot provider-table shape with an explicit
+    CodexPilot-owned mode marker, and switch `~/.codex/auth.json` into a pure
+    API-key auth payload that contains `OPENAI_API_KEY`
 
 ### Chat Completions Upstream
 
@@ -237,6 +239,27 @@ When a stored profile has `upstreamProtocol = anthropicMessages`:
   - Responses request -> Anthropic Messages request
   - Anthropic Messages response -> Responses response
   - Anthropic Messages SSE -> Responses SSE
+
+## Traditional Mode Compatibility
+
+The user-facing meaning of `传统中转` remains "use a configured API provider
+without depending on official ChatGPT login". The runtime behavior should now
+match CodexPlusPlus's proven pure-API path instead of pretending that ChatGPT
+login is still present.
+
+Therefore:
+
+- `传统中转` should continue writing its own provider table in `config.toml`
+  and add an explicit internal mode marker so runtime status can distinguish
+  `传统中转` from `混合中转`;
+- activating `传统中转` should replace `~/.codex/auth.json` with a pure API-key
+  payload whose primary meaning is `OPENAI_API_KEY`, rather than preserving a
+  mixed ChatGPT-login auth shape;
+- injected page patches may unlock plugin entry or disabled install buttons
+  only when the active CodexPilot mode is explicitly `传统中转`.
+
+This is a compatibility behavior for traditional mode, not a general-purpose
+"always unlock plugins" feature.
 
 ## Helper Routing
 

@@ -75,6 +75,36 @@ experimental_bearer_token = "sk-..."
 
 如果没有检测到 `~/.codex/auth.json` 中的 ChatGPT 登录态，CodexPilot 会拒绝保存混合中转配置。
 
+### 传统中转
+
+在管理器“模型通道”页面选择“传统中转”并点击“保存”，CodexPilot 会：
+
+- 写入 `model_providers.CodexPilot`，并把当前 Base URL / API key 应用到 Codex。
+- 把 `~/.codex/auth.json` 切换成纯 API key 形态，仅保留 `OPENAI_API_KEY`。
+- 通过页面注入开启插件入口和插件安装按钮的解锁逻辑。
+
+配置形态类似：
+
+```toml
+model_provider = "CodexPilot"
+
+[model_providers.CodexPilot]
+name = "CodexPilot"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://example.com/v1"
+codex_pilot_channel_mode = "api"
+experimental_bearer_token = "sk-..."
+```
+
+对应的 `~/.codex/auth.json` 会被切成：
+
+```json
+{
+  "OPENAI_API_KEY": "sk-..."
+}
+```
+
 ### 官方通道
 
 在管理器“模型通道”页面选择“官方通道”并点击“保存”，CodexPilot 会：

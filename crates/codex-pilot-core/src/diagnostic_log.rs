@@ -97,12 +97,7 @@ pub fn read_tail(max_lines: usize) -> anyhow::Result<Vec<String>> {
         if remaining == 0 {
             break;
         }
-        lines.extend(
-            text.lines()
-                .rev()
-                .take(remaining)
-                .map(ToString::to_string),
-        );
+        lines.extend(text.lines().rev().take(remaining).map(ToString::to_string));
     }
     lines.reverse();
     Ok(lines)

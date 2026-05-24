@@ -106,6 +106,11 @@ struct ProviderSnapshot {
     configured: bool,
     authenticated: bool,
     account_label: Option<String>,
+    route_label: String,
+    status_message: String,
+    degraded: bool,
+    official_snapshot_available: bool,
+    backup_snapshot_available: bool,
     profiles: Vec<ProviderProfile>,
     active_profile_id: String,
 }
@@ -185,13 +190,26 @@ impl ProviderProfileMode {
     fn label(self) -> &'static str {
         match self {
             ProviderProfileMode::HybridApi => "混合中转",
-            ProviderProfileMode::Api => "传统中转",
+            ProviderProfileMode::Api => "API 中转",
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum AuthenticatedBehavior {
+    Relay,
+    OfficialDirect,
+}
+
+impl AuthenticatedBehavior {}
+
 fn default_provider_profile_mode() -> ProviderProfileMode {
     ProviderProfileMode::HybridApi
+}
+
+fn default_authenticated_behavior() -> AuthenticatedBehavior {
+    AuthenticatedBehavior::Relay
 }
 
 fn default_upstream_protocol() -> codex_pilot_core::protocol_proxy::UpstreamProtocol {
@@ -209,12 +227,22 @@ struct ProviderProfile {
     mode: ProviderProfileMode,
     #[serde(default = "default_upstream_protocol")]
     upstream_protocol: codex_pilot_core::protocol_proxy::UpstreamProtocol,
+    #[serde(default = "default_authenticated_behavior")]
+    authenticated_behavior: AuthenticatedBehavior,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficialConfigSnapshot {
+    config_toml: String,
+    captured_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderProfilesState {
     active_profile_id: String,
+    official_config_snapshot: Option<OfficialConfigSnapshot>,
     profiles: Vec<ProviderProfile>,
 }
 
@@ -222,6 +250,7 @@ impl Default for ProviderProfilesState {
     fn default() -> Self {
         Self {
             active_profile_id: "default".to_string(),
+            official_config_snapshot: None,
             profiles: vec![ProviderProfile {
                 id: "default".to_string(),
                 name: "默认中转".to_string(),
@@ -229,6 +258,7 @@ impl Default for ProviderProfilesState {
                 bearer_token: String::new(),
                 mode: ProviderProfileMode::HybridApi,
                 upstream_protocol: default_upstream_protocol(),
+                authenticated_behavior: default_authenticated_behavior(),
             }],
         }
     }
@@ -244,6 +274,8 @@ struct ProviderProfileSaveRequest {
     mode: ProviderProfileMode,
     #[serde(default = "default_upstream_protocol")]
     upstream_protocol: codex_pilot_core::protocol_proxy::UpstreamProtocol,
+    #[serde(default = "default_authenticated_behavior")]
+    authenticated_behavior: AuthenticatedBehavior,
     activate: bool,
 }
 
@@ -254,10 +286,52 @@ struct ProviderProfileSaveResponse {
     message: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficialSnapshotImportResult {
+    message: String,
+    provider: ProviderSnapshot,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OfficialSnapshotPrepareResult {
+    message: String,
+    provider: ProviderSnapshot,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProviderProfileIdRequest {
     id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectiveRoute {
+    OfficialDirect,
+    RelayAuthenticated,
+    RelayApi,
+    DegradedRelay,
+}
+
+impl EffectiveRoute {
+    fn label(self) -> &'static str {
+        match self {
+            EffectiveRoute::OfficialDirect => "官方直连",
+            EffectiveRoute::RelayAuthenticated => "自动中转（登录态）",
+            EffectiveRoute::RelayApi => "自动中转（API）",
+            EffectiveRoute::DegradedRelay => "已退化为自动中转",
+        }
+    }
+}
+
+struct AppliedProfileResult {
+    message: String,
+}
+
+struct BackupCandidate {
+    path: PathBuf,
+    modified_at_ms: u64,
 }
 
 #[derive(Deserialize)]
@@ -287,9 +361,61 @@ struct RecycleBinBatchResponse {
     failed: Vec<RecycleBinBatchFailure>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionZipExportResult {
+    zip_path: String,
+    manifest: codex_pilot_data::session_zip::SessionZipManifest,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionZipInspectResult {
+    zip_path: String,
+    manifest: codex_pilot_data::session_zip::SessionZipManifest,
+    entries: codex_pilot_data::session_zip::SessionZipIncludes,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionZipImportResult {
+    mode: String,
+    manifest: codex_pilot_data::session_zip::SessionZipManifest,
+    restored_session_files: usize,
+    restored_archived_session_files: usize,
+    restored_state_sqlite: bool,
+    safety_backup_zip_path: Option<String>,
+    message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionZipImportRequest {
+    zip_path: String,
+    mode: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionZipExportRequest {
+    zip_path: String,
+}
+
 #[tauri::command]
 fn backend_status() -> Result<Option<codex_pilot_core::status::BackendStatus>, String> {
-    codex_pilot_core::status::read_status().map_err(|error| error.to_string())
+    let prefs = load_launch_preferences();
+    let helper_port = launch_options_from_preferences(&prefs).helper_port;
+    let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(helper_port);
+    let status = codex_pilot_core::status::read_status().map_err(|error| error.to_string())?;
+
+    if helper_reachable {
+        return Ok(Some(codex_pilot_core::status::BackendStatus {
+            status: "running".to_string(),
+            version: codex_pilot_core::version::VERSION.to_string(),
+        }));
+    }
+
+    Ok(status)
 }
 
 #[tauri::command]
@@ -356,7 +482,8 @@ async fn launch_codex(state: tauri::State<'_, ManagerState>) -> Result<String, S
         return Ok("CodexPilot 已在运行中。".to_string());
     }
     if codex_pilot_core::ports::can_connect_loopback_port(options.debug_port) {
-        return inject_existing_codex(&state, &prefs, options.debug_port, options.helper_port).await;
+        return inject_existing_codex(&state, &prefs, options.debug_port, options.helper_port)
+            .await;
     }
     if is_codex_process_running() {
         return Err(
@@ -585,10 +712,7 @@ fn clear_backend_status_file() {
     }
 }
 
-async fn auto_sync_sessions_after_launch(
-    launch_action: &str,
-    prefs: &LaunchPreferences,
-) -> String {
+async fn auto_sync_sessions_after_launch(launch_action: &str, prefs: &LaunchPreferences) -> String {
     let success_message = match launch_action {
         "reinject" => "已重新注入 CodexPilot。",
         _ => "已启动 CodexPilot。",
@@ -659,7 +783,12 @@ async fn auto_sync_sessions_after_launch(
 
     let sync_result = tauri::async_runtime::spawn_blocking({
         let target_provider = inspection.target_provider.clone();
-        move || codex_pilot_data::provider_sync::run_provider_sync_with_target(None, Some(&target_provider))
+        move || {
+            codex_pilot_data::provider_sync::run_provider_sync_with_target(
+                None,
+                Some(&target_provider),
+            )
+        }
     })
     .await;
 
@@ -691,7 +820,10 @@ async fn auto_sync_sessions_after_launch(
     );
 
     if sync_result.status != codex_pilot_data::provider_sync::ProviderSyncStatus::Synced {
-        return format!("{success_message} 但自动同步会话失败：{}", sync_result.message);
+        return format!(
+            "{success_message} 但自动同步会话失败：{}",
+            sync_result.message
+        );
     }
 
     match launch_action {
@@ -730,18 +862,19 @@ fn provider_snapshot() -> ProviderSnapshot {
         .iter()
         .find(|profile| profile.id == profiles.active_profile_id)
         .or_else(|| profiles.profiles.first());
-    let effective_mode = if provider.active {
-        provider.mode.as_str()
-    } else {
-        "official"
-    };
-    let effective_profile_name = if effective_mode == "official" {
-        "官方通道".to_string()
-    } else {
-        active_profile
-            .map(|profile| profile.name.clone())
-            .unwrap_or_else(|| "默认中转".to_string())
-    };
+    let official_snapshot_available = profiles.official_config_snapshot.is_some();
+    let backup_snapshot_available = latest_official_backup_candidate().is_some();
+    let effective_route =
+        infer_effective_route(&provider, active_profile, official_snapshot_available);
+    let effective_profile_name = active_profile
+        .map(|profile| profile.name.clone())
+        .unwrap_or_else(|| "默认中转".to_string());
+    let status_message = provider_status_message(
+        &provider,
+        active_profile,
+        official_snapshot_available,
+        effective_route,
+    );
     ProviderSnapshot {
         active_provider: if provider.active {
             provider.provider
@@ -761,6 +894,11 @@ fn provider_snapshot() -> ProviderSnapshot {
         configured: provider.configured,
         authenticated: provider.authenticated,
         account_label: provider.account_label,
+        route_label: effective_route.label().to_string(),
+        status_message,
+        degraded: effective_route == EffectiveRoute::DegradedRelay,
+        official_snapshot_available,
+        backup_snapshot_available,
         profiles: profiles.profiles,
         active_profile_id: profiles.active_profile_id,
     }
@@ -769,6 +907,50 @@ fn provider_snapshot() -> ProviderSnapshot {
 #[tauri::command]
 fn ccs_provider_snapshot() -> CcsProviderSnapshot {
     ccs_provider_snapshot_for_state(&load_provider_profiles())
+}
+
+#[tauri::command]
+fn import_official_snapshot_from_backup() -> Result<OfficialSnapshotImportResult, String> {
+    let mut state = load_provider_profiles();
+    let backup = latest_official_backup_candidate()
+        .ok_or_else(|| "未找到可导入的官方原版备份。".to_string())?;
+    let config_toml = std::fs::read_to_string(&backup.path)
+        .map_err(|error| format!("读取官方原版备份失败：{error}"))?;
+    state.official_config_snapshot = Some(OfficialConfigSnapshot {
+        config_toml,
+        captured_at_ms: backup.modified_at_ms,
+    });
+    save_provider_profiles_to_path(&provider_profiles_path(), &state)?;
+    Ok(OfficialSnapshotImportResult {
+        message: format!("已从备份导入官方原版快照：{}。", backup.path.display()),
+        provider: provider_snapshot(),
+    })
+}
+
+#[tauri::command]
+fn prepare_official_snapshot_after_clearing_relay() -> Result<OfficialSnapshotPrepareResult, String>
+{
+    codex_pilot_core::relay_config::clear_relay_provider_config()
+        .map_err(|error| format!("停止 CodexPilot 中转失败：{error}"))?;
+
+    let mut state = load_provider_profiles();
+    let snapshot = codex_pilot_core::relay_config::capture_official_config_snapshot_from_home(
+        &codex_pilot_core::app_paths::codex_home_dir(),
+    )
+    .map_err(|error| format!("准备官方原版恢复点失败：{error}"))?;
+
+    let snapshot = snapshot
+        .ok_or_else(|| "当前仍不是可保存的官方状态，暂时无法准备官方原版恢复点。".to_string())?;
+
+    state.official_config_snapshot = Some(OfficialConfigSnapshot {
+        config_toml: snapshot.config_toml,
+        captured_at_ms: snapshot.captured_at_ms,
+    });
+    save_provider_profiles_to_path(&provider_profiles_path(), &state)?;
+    Ok(OfficialSnapshotPrepareResult {
+        message: "已停止当前中转，并准备好官方原版恢复点。".to_string(),
+        provider: provider_snapshot(),
+    })
 }
 
 #[tauri::command]
@@ -803,6 +985,7 @@ fn import_ccs_provider_profiles() -> Result<CcsImportResult, String> {
             bearer_token: candidate.api_key.trim().to_string(),
             mode,
             upstream_protocol: candidate.upstream_protocol,
+            authenticated_behavior: default_authenticated_behavior(),
         });
         imported_count += 1;
     }
@@ -836,33 +1019,34 @@ fn import_ccs_provider_profiles() -> Result<CcsImportResult, String> {
 async fn apply_provider(request: ProviderApplyRequest) -> Result<String, String> {
     let profiles = load_provider_profiles();
     let profile = profile_by_id(&profiles, request.profile_id.as_deref())?;
-    let base_url = profile.base_url;
-    let bearer_token = profile.bearer_token;
-    let mode = request.mode.unwrap_or(profile.mode);
-    let upstream_protocol = profile.upstream_protocol;
+    let snapshot = profiles.official_config_snapshot.clone();
+    let requested_mode = request.mode;
     tauri::async_runtime::spawn_blocking(move || {
-        let result = match mode {
-            ProviderProfileMode::HybridApi => {
-                codex_pilot_core::relay_config::apply_relay_provider_config_with_protocol(
-                    &base_url,
-                    &bearer_token,
-                    upstream_protocol,
-                )
-                .map_err(|error| format!("应用混合中转失败：{error}"))?
-            }
-            ProviderProfileMode::Api => {
-                codex_pilot_core::relay_config::apply_api_provider_config_with_protocol(
-                    &base_url,
-                    &bearer_token,
-                    upstream_protocol,
-                )
-                .map_err(|error| format!("应用传统中转失败：{error}"))?
-            }
-        };
-        Ok(result
-            .backup_path
-            .map(|path| format!("{} 已应用，备份：{path}。", mode.label()))
-            .unwrap_or_else(|| format!("{} 已应用。", mode.label())))
+        if let Some(mode) = requested_mode {
+            let result = match mode {
+                ProviderProfileMode::HybridApi => {
+                    codex_pilot_core::relay_config::apply_relay_provider_config_with_protocol(
+                        &profile.base_url,
+                        &profile.bearer_token,
+                        profile.upstream_protocol,
+                    )
+                    .map_err(|error| format!("应用混合中转失败：{error}"))?
+                }
+                ProviderProfileMode::Api => {
+                    codex_pilot_core::relay_config::apply_api_provider_config_with_protocol(
+                        &profile.base_url,
+                        &profile.bearer_token,
+                        profile.upstream_protocol,
+                    )
+                    .map_err(|error| format!("应用传统中转失败：{error}"))?
+                }
+            };
+            return Ok(result
+                .backup_path
+                .map(|path| format!("{} 已应用，备份：{path}。", mode.label()))
+                .unwrap_or_else(|| format!("{} 已应用。", mode.label())));
+        }
+        apply_profile_now(&profile, snapshot.as_ref()).map(|result| result.message)
     })
     .await
     .map_err(|error| format!("应用运行模式任务失败：{error}"))?
@@ -876,9 +1060,11 @@ fn save_provider_profile(
     let activate = request.activate;
     let profile = sanitize_provider_profile(request)?;
     let normalized_name = profile.name.trim();
-    if state.profiles.iter().any(|item| {
-        item.id != profile.id && item.name.trim().eq_ignore_ascii_case(normalized_name)
-    }) {
+    if state
+        .profiles
+        .iter()
+        .any(|item| item.id != profile.id && item.name.trim().eq_ignore_ascii_case(normalized_name))
+    {
         return Err("配置档名称不能重复。".to_string());
     }
     let id = profile.id.clone();
@@ -894,11 +1080,14 @@ fn save_provider_profile(
     {
         state.active_profile_id = id.clone();
     }
+    capture_official_snapshot_if_missing(&mut state)?;
     save_provider_profiles_to_path(&provider_profiles_path(), &state)?;
-    Ok(ProviderProfileSaveResponse {
-        id,
-        message: "中转配置档已保存。".to_string(),
-    })
+    let message = if state.active_profile_id == id {
+        apply_active_profile(&state)?
+    } else {
+        "中转配置档已保存。".to_string()
+    };
+    Ok(ProviderProfileSaveResponse { id, message })
 }
 
 #[tauri::command]
@@ -912,8 +1101,9 @@ fn activate_provider_profile(request: ProviderProfileIdRequest) -> Result<String
         return Err("中转配置档不存在。".to_string());
     }
     state.active_profile_id = request.id;
+    capture_official_snapshot_if_missing(&mut state)?;
     save_provider_profiles_to_path(&provider_profiles_path(), &state)?;
-    Ok("已切换中转配置档。".to_string())
+    apply_active_profile(&state)
 }
 
 #[tauri::command]
@@ -1132,21 +1322,131 @@ async fn delete_recycle_bin_entries(
 }
 
 #[tauri::command]
+async fn export_session_zip(
+    request: SessionZipExportRequest,
+) -> Result<SessionZipExportResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = codex_pilot_data::session_zip::SessionZipService::new(
+            codex_pilot_core::app_paths::codex_home_dir(),
+        );
+        let zip_path = PathBuf::from(request.zip_path);
+        service
+            .export_current_state_to_path(&zip_path)
+            .map(|result| SessionZipExportResult {
+                zip_path: result.zip_path.to_string_lossy().to_string(),
+                manifest: result.manifest,
+            })
+            .map_err(|error| format!("导出 ZIP 失败：{error}"))
+    })
+    .await
+    .map_err(|error| format!("导出 ZIP 任务失败：{error}"))?
+}
+
+#[tauri::command]
+fn pick_session_zip_save_path() -> Result<Option<String>, String> {
+    let file = rfd::FileDialog::new()
+        .add_filter("ZIP", &["zip"])
+        .set_file_name(&format!("codex-sessions-backup-{}.zip", now_secs()))
+        .set_title("保存 Codex 对话备份 ZIP")
+        .save_file();
+    Ok(file.map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn pick_session_zip_file() -> Result<Option<String>, String> {
+    let file = rfd::FileDialog::new()
+        .add_filter("ZIP", &["zip"])
+        .set_title("选择 Codex 对话备份 ZIP")
+        .pick_file();
+    Ok(file.map(|path| path.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+async fn inspect_session_zip(zip_path: String) -> Result<SessionZipInspectResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = codex_pilot_data::session_zip::SessionZipService::new(
+            codex_pilot_core::app_paths::codex_home_dir(),
+        );
+        service
+            .inspect_zip(Path::new(&zip_path))
+            .map(|result| SessionZipInspectResult {
+                zip_path: result.zip_path.to_string_lossy().to_string(),
+                manifest: result.manifest,
+                entries: result.entries,
+            })
+            .map_err(|error| format!("检查 ZIP 失败：{error}"))
+    })
+    .await
+    .map_err(|error| format!("检查 ZIP 任务失败：{error}"))?
+}
+
+#[tauri::command]
+async fn import_session_zip(
+    request: SessionZipImportRequest,
+) -> Result<SessionZipImportResult, String> {
+    let mode = parse_session_zip_import_mode(&request.mode)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = codex_pilot_data::session_zip::SessionZipService::new(
+            codex_pilot_core::app_paths::codex_home_dir(),
+        );
+        service
+            .import_zip(Path::new(&request.zip_path), mode)
+            .map(|result| SessionZipImportResult {
+                mode: match result.mode {
+                    codex_pilot_data::session_zip::SessionZipImportMode::Merge => "merge",
+                    codex_pilot_data::session_zip::SessionZipImportMode::Overwrite => "overwrite",
+                }
+                .to_string(),
+                manifest: result.manifest,
+                restored_session_files: result.restored_session_files,
+                restored_archived_session_files: result.restored_archived_session_files,
+                restored_state_sqlite: result.restored_state_sqlite,
+                safety_backup_zip_path: result
+                    .safety_backup_zip_path
+                    .map(|path| path.to_string_lossy().to_string()),
+                message: result.message,
+            })
+            .map_err(|error| format!("导入 ZIP 失败：{error}"))
+    })
+    .await
+    .map_err(|error| format!("导入 ZIP 任务失败：{error}"))?
+}
+
+#[tauri::command]
 async fn diagnostics_snapshot() -> Result<DiagnosticsSnapshot, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let status_path = codex_pilot_core::status::status_path();
+        let status_exists = status_path.exists();
+        let prefs = load_launch_preferences();
+        let helper_port = launch_options_from_preferences(&prefs).helper_port;
+        let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(helper_port);
         let provider_sync_check = provider_sync_diagnostic_check();
         DiagnosticsSnapshot {
             checks: vec![
                 DiagnosticCheck {
-                    name: "后端状态文件".to_string(),
-                    status: if status_path.exists() {
+                    name: "后端状态".to_string(),
+                    status: if helper_reachable || status_exists {
                         "ok"
                     } else {
                         "missing"
                     }
                     .to_string(),
-                    detail: status_path.to_string_lossy().to_string(),
+                    detail: if helper_reachable {
+                        format!(
+                            "本地连接服务已连接；状态文件仅作辅助手段。路径：{}",
+                            status_path.to_string_lossy()
+                        )
+                    } else if status_exists {
+                        format!(
+                            "未检测到本地连接服务，但发现状态文件：{}。这通常说明后端曾成功启动，可结合启动页再确认当前连接。",
+                            status_path.to_string_lossy()
+                        )
+                    } else {
+                        format!(
+                            "未检测到本地连接服务，且状态文件不存在：{}",
+                            status_path.to_string_lossy()
+                        )
+                    },
                 },
                 DiagnosticCheck {
                     name: "Codex 应用探测".to_string(),
@@ -1210,6 +1510,8 @@ pub fn run() {
             provider_snapshot,
             ccs_provider_snapshot,
             import_ccs_provider_profiles,
+            import_official_snapshot_from_backup,
+            prepare_official_snapshot_after_clearing_relay,
             apply_provider,
             save_provider_profile,
             activate_provider_profile,
@@ -1220,6 +1522,11 @@ pub fn run() {
             recycle_bin_snapshot,
             restore_recycle_bin_entries,
             delete_recycle_bin_entries,
+            export_session_zip,
+            pick_session_zip_save_path,
+            pick_session_zip_file,
+            inspect_session_zip,
+            import_session_zip,
             diagnostics_snapshot,
             collect_diagnostics
         ])
@@ -1298,7 +1605,7 @@ fn launch_action_detail(
     options: &codex_pilot_core::launcher::LaunchOptions,
 ) -> String {
     match launch_action_kind(ready, manager_running, options).as_str() {
-        "running" => "CodexPilot 后端已连接，无需重复启动。".to_string(),
+        "running" => "CodexPilot 已连接，无需重复启动。".to_string(),
         "reinject" => "检测到 Codex 调试端口，可以直接重新注入。".to_string(),
         "restart" => "检测到 Codex 已运行，但没有调试端口；需要确认后重启。".to_string(),
         "launch" => "未检测到运行中的 Codex，可以从 CodexPilot 启动并注入。".to_string(),
@@ -1549,6 +1856,33 @@ fn provider_profiles_path() -> PathBuf {
     codex_pilot_core::app_paths::app_state_dir().join("provider-profiles.json")
 }
 
+fn latest_official_backup_candidate() -> Option<BackupCandidate> {
+    let config_path = codex_pilot_core::app_paths::codex_config_path();
+    let parent = config_path.parent()?;
+    let entries = std::fs::read_dir(parent).ok()?;
+    entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            if !name.starts_with("config.toml.codex-pilot-backup-") || !name.ends_with(".bak") {
+                return None;
+            }
+            let metadata = entry.metadata().ok()?;
+            let modified_at_ms = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0);
+            Some(BackupCandidate {
+                path,
+                modified_at_ms,
+            })
+        })
+        .max_by_key(|candidate| candidate.modified_at_ms)
+}
+
 fn enhancement_settings_path() -> PathBuf {
     codex_pilot_core::app_paths::app_state_dir().join("enhancement-settings.json")
 }
@@ -1596,9 +1930,15 @@ fn ccs_provider_snapshot_for_state(state: &ProviderProfilesState) -> CcsProvider
                 .count();
             let (status, message) = if available_count == 0 {
                 if db_path.exists() {
-                    ("empty".to_string(), "未发现 CCSwitch Codex 配置。".to_string())
+                    (
+                        "empty".to_string(),
+                        "未发现 CCSwitch Codex 配置。".to_string(),
+                    )
                 } else {
-                    ("missing".to_string(), "未找到 CCSwitch 数据库。".to_string())
+                    (
+                        "missing".to_string(),
+                        "未找到 CCSwitch 数据库。".to_string(),
+                    )
                 }
             } else {
                 (
@@ -1640,6 +1980,109 @@ fn profile_by_id(
         .ok_or_else(|| "没有可用的中转配置档。".to_string())
 }
 
+fn active_profile(state: &ProviderProfilesState) -> Option<&ProviderProfile> {
+    state
+        .profiles
+        .iter()
+        .find(|profile| profile.id == state.active_profile_id)
+        .or_else(|| state.profiles.first())
+}
+
+fn capture_official_snapshot_if_missing(state: &mut ProviderProfilesState) -> Result<(), String> {
+    if state.official_config_snapshot.is_some() {
+        return Ok(());
+    }
+    let snapshot = codex_pilot_core::relay_config::capture_official_config_snapshot_from_home(
+        &codex_pilot_core::app_paths::codex_home_dir(),
+    )
+    .map_err(|error| format!("捕获官方原版配置失败：{error}"))?;
+    state.official_config_snapshot = snapshot.map(|snapshot| OfficialConfigSnapshot {
+        config_toml: snapshot.config_toml,
+        captured_at_ms: snapshot.captured_at_ms,
+    });
+    Ok(())
+}
+
+fn apply_active_profile(state: &ProviderProfilesState) -> Result<String, String> {
+    let profile = active_profile(state)
+        .cloned()
+        .ok_or_else(|| "没有可用的中转配置档。".to_string())?;
+    let snapshot = state.official_config_snapshot.clone();
+    tauri::async_runtime::block_on(async move {
+        tauri::async_runtime::spawn_blocking(move || {
+            let applied = apply_profile_now(&profile, snapshot.as_ref())?;
+            Ok(applied.message)
+        })
+        .await
+        .map_err(|error| format!("应用中转配置档任务失败：{error}"))?
+    })
+}
+
+fn apply_profile_now(
+    profile: &ProviderProfile,
+    official_snapshot: Option<&OfficialConfigSnapshot>,
+) -> Result<AppliedProfileResult, String> {
+    let auth = codex_pilot_core::relay_config::default_chatgpt_auth_status();
+    let upstream_protocol = profile.upstream_protocol;
+    let relay_result = || match auth.authenticated {
+        true => codex_pilot_core::relay_config::apply_relay_provider_config_with_protocol(
+            &profile.base_url,
+            &profile.bearer_token,
+            upstream_protocol,
+        )
+        .map_err(|error| format!("应用自动中转失败：{error}")),
+        false => codex_pilot_core::relay_config::apply_api_provider_config_with_protocol(
+            &profile.base_url,
+            &profile.bearer_token,
+            upstream_protocol,
+        )
+        .map_err(|error| format!("应用 API 中转失败：{error}")),
+    };
+
+    if auth.authenticated && profile.authenticated_behavior == AuthenticatedBehavior::OfficialDirect
+    {
+        if let Some(snapshot) = official_snapshot {
+            let result =
+                codex_pilot_core::relay_config::restore_official_config_snapshot_from_home(
+                    &codex_pilot_core::app_paths::codex_home_dir(),
+                    &codex_pilot_core::relay_config::OfficialConfigSnapshot {
+                        config_toml: snapshot.config_toml.clone(),
+                        captured_at_ms: snapshot.captured_at_ms,
+                    },
+                )
+                .map_err(|error| format!("恢复官方原版配置失败：{error}"))?;
+            let message = result
+                .backup_path
+                .map(|path| format!("已恢复官方原版配置，备份：{path}。"))
+                .unwrap_or_else(|| "已恢复官方原版配置。".to_string());
+            return Ok(AppliedProfileResult { message });
+        }
+
+        relay_result()?;
+        return Ok(AppliedProfileResult {
+            message: "未找到官方原版快照，已退化为自动中转。".to_string(),
+        });
+    }
+
+    if !auth.authenticated
+        && profile.authenticated_behavior == AuthenticatedBehavior::OfficialDirect
+    {
+        relay_result()?;
+        return Ok(AppliedProfileResult {
+            message: "未检测到官方登录，当前已按 API 中转应用。".to_string(),
+        });
+    }
+
+    relay_result()?;
+    Ok(AppliedProfileResult {
+        message: if auth.authenticated {
+            "已按登录态应用自动中转。".to_string()
+        } else {
+            "已按 API 中转应用。".to_string()
+        },
+    })
+}
+
 fn sanitize_provider_profile(
     request: ProviderProfileSaveRequest,
 ) -> Result<ProviderProfile, String> {
@@ -1653,6 +2096,7 @@ fn sanitize_provider_profile(
     let bearer_token = request.bearer_token.trim().to_string();
     let mode = request.mode;
     let upstream_protocol = request.upstream_protocol;
+    let authenticated_behavior = request.authenticated_behavior;
     if name.is_empty() {
         return Err("配置档名称不能为空。".to_string());
     }
@@ -1669,6 +2113,7 @@ fn sanitize_provider_profile(
         bearer_token,
         mode,
         upstream_protocol,
+        authenticated_behavior,
     })
 }
 
@@ -1685,6 +2130,7 @@ fn sanitize_provider_profiles_state(
             bearer_token: profile.bearer_token.trim().to_string(),
             mode: profile.mode,
             upstream_protocol: profile.upstream_protocol,
+            authenticated_behavior: profile.authenticated_behavior,
         })
         .filter(|profile| !profile.id.is_empty() && !profile.name.is_empty())
         .collect();
@@ -1699,6 +2145,61 @@ fn sanitize_provider_profiles_state(
         state.active_profile_id = state.profiles[0].id.clone();
     }
     Ok(state)
+}
+
+fn infer_effective_route(
+    provider: &codex_pilot_core::relay_config::RelayProviderConfig,
+    active_profile: Option<&ProviderProfile>,
+    official_snapshot_available: bool,
+) -> EffectiveRoute {
+    if !provider.active {
+        return EffectiveRoute::OfficialDirect;
+    }
+    if provider.authenticated {
+        if active_profile
+            .map(|profile| profile.authenticated_behavior == AuthenticatedBehavior::OfficialDirect)
+            .unwrap_or(false)
+            && !official_snapshot_available
+        {
+            return EffectiveRoute::DegradedRelay;
+        }
+        return EffectiveRoute::RelayAuthenticated;
+    }
+    if active_profile
+        .map(|profile| profile.authenticated_behavior == AuthenticatedBehavior::OfficialDirect)
+        .unwrap_or(false)
+    {
+        return EffectiveRoute::DegradedRelay;
+    }
+    EffectiveRoute::RelayApi
+}
+
+fn provider_status_message(
+    provider: &codex_pilot_core::relay_config::RelayProviderConfig,
+    active_profile: Option<&ProviderProfile>,
+    official_snapshot_available: bool,
+    route: EffectiveRoute,
+) -> String {
+    match route {
+        EffectiveRoute::OfficialDirect => "当前使用官方原版配置。".to_string(),
+        EffectiveRoute::RelayAuthenticated => "当前按登录态使用自动中转。".to_string(),
+        EffectiveRoute::RelayApi => "当前按 API 形态使用自动中转。".to_string(),
+        EffectiveRoute::DegradedRelay => {
+            if !provider.authenticated
+                && active_profile
+                    .map(|profile| {
+                        profile.authenticated_behavior == AuthenticatedBehavior::OfficialDirect
+                    })
+                    .unwrap_or(false)
+            {
+                "未检测到官方登录，当前已按 API 中转应用。".to_string()
+            } else if !official_snapshot_available {
+                "未找到官方原版快照，已退化为自动中转。".to_string()
+            } else {
+                "当前已退化为自动中转。".to_string()
+            }
+        }
+    }
 }
 
 fn profiles_equivalent(
@@ -1734,10 +2235,9 @@ fn unique_imported_profile_name(existing: &[ProviderProfile], original_name: &st
     let mut index = 2usize;
     loop {
         let candidate = format!("{base} (CCS {index})");
-        if !existing
-            .iter()
-            .any(|profile| normalize_compare_text(&profile.name) == normalize_compare_text(&candidate))
-        {
+        if !existing.iter().any(|profile| {
+            normalize_compare_text(&profile.name) == normalize_compare_text(&candidate)
+        }) {
             return candidate;
         }
         index += 1;
@@ -1757,10 +2257,7 @@ fn normalize_compare_text(value: &str) -> String {
 }
 
 fn normalize_base_url(value: &str) -> String {
-    value
-        .trim()
-        .trim_end_matches('/')
-        .to_ascii_lowercase()
+    value.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
 fn load_launch_preferences() -> LaunchPreferences {
@@ -1992,6 +2489,10 @@ mod tests {
         let path = root.join("provider-profiles.json");
         let state = ProviderProfilesState {
             active_profile_id: "p2".to_string(),
+            official_config_snapshot: Some(OfficialConfigSnapshot {
+                config_toml: "model_provider = \"openai\"\n".to_string(),
+                captured_at_ms: 1770000000000,
+            }),
             profiles: vec![
                 ProviderProfile {
                     id: "p1".to_string(),
@@ -2000,6 +2501,7 @@ mod tests {
                     bearer_token: "sk-one".to_string(),
                     mode: ProviderProfileMode::HybridApi,
                     upstream_protocol: default_upstream_protocol(),
+                    authenticated_behavior: default_authenticated_behavior(),
                 },
                 ProviderProfile {
                     id: "p2".to_string(),
@@ -2008,6 +2510,7 @@ mod tests {
                     bearer_token: "sk-two".to_string(),
                     mode: ProviderProfileMode::Api,
                     upstream_protocol: default_upstream_protocol(),
+                    authenticated_behavior: AuthenticatedBehavior::OfficialDirect,
                 },
             ],
         };
@@ -2016,6 +2519,21 @@ mod tests {
         let loaded = load_provider_profiles_from_path(&path).unwrap();
         assert_eq!(loaded.active_profile_id, "p2");
         assert_eq!(loaded.profiles.len(), 2);
+        assert_eq!(
+            loaded
+                .official_config_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.config_toml.as_str()),
+            Some("model_provider = \"openai\"\n")
+        );
+        assert_eq!(
+            loaded.profiles[0].authenticated_behavior,
+            AuthenticatedBehavior::Relay
+        );
+        assert_eq!(
+            loaded.profiles[1].authenticated_behavior,
+            AuthenticatedBehavior::OfficialDirect
+        );
         assert_eq!(
             profile_by_id(&loaded, None).unwrap().base_url,
             "https://two.example/v1"
@@ -2038,4 +2556,21 @@ fn now_nanos() -> u128 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos()
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn parse_session_zip_import_mode(
+    value: &str,
+) -> Result<codex_pilot_data::session_zip::SessionZipImportMode, String> {
+    match value {
+        "merge" => Ok(codex_pilot_data::session_zip::SessionZipImportMode::Merge),
+        "overwrite" => Ok(codex_pilot_data::session_zip::SessionZipImportMode::Overwrite),
+        _ => Err(format!("不支持的导入模式：{value}")),
+    }
 }

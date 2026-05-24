@@ -29,7 +29,10 @@
   const selectors = {
     sidebarThread: "[data-app-action-sidebar-thread-id]",
     threadTitle: "[data-thread-title], .truncate.select-none, .truncate.text-base",
-    archiveNav: 'button[aria-label="已归档对话"], button[aria-label="Archived conversations"]'
+    archiveNav: 'button[aria-label="已归档对话"], button[aria-label="Archived conversations"]',
+    disabledInstallButton: 'button:disabled, button[aria-disabled="true"], [role="button"][aria-disabled="true"], button[data-disabled], [role="button"][data-disabled], button.cursor-not-allowed, [role="button"].cursor-not-allowed, button.pointer-events-none, [role="button"].pointer-events-none',
+    pluginNavButton: 'nav[role="navigation"] button.h-token-nav-row.w-full',
+    pluginSvgPath: 'svg path[d^="M7.94562 14.0277"]'
   };
   let lastUndoToken = null;
   let activeScrollSessionId = "";
@@ -52,6 +55,11 @@
     scrollRestore: true
   };
   let enhancementSettings = { ...defaultEnhancementSettings };
+  let pluginPatchStatus = {
+    loaded: false,
+    mode: "official",
+    pluginPatchEnabled: false
+  };
 
   function isActiveBoot() {
     return window.__CODEX_PILOT_BOOT_ID__ === bootId;
@@ -78,6 +86,9 @@
     },
     enhancementSettings() {
       return this.bridge("/enhancement/settings");
+    },
+    pluginPatchStatus() {
+      return this.bridge("/provider/plugin-patch-status");
     },
     detectSession() {
       return detectCurrentSession();
@@ -137,6 +148,30 @@
       reportRendererEvent("enhancement_settings_error", { message: String(error) });
     }
     return enhancementSettings;
+  }
+
+  function pluginPatchEnabled() {
+    return pluginPatchStatus.loaded && pluginPatchStatus.pluginPatchEnabled;
+  }
+
+  async function loadPluginPatchStatus() {
+    try {
+      const response = await window.__CODEX_PILOT__.pluginPatchStatus();
+      const result = response.result || response;
+      pluginPatchStatus = {
+        loaded: true,
+        mode: String(result.mode || "official"),
+        pluginPatchEnabled: Boolean(result.pluginPatchEnabled)
+      };
+    } catch (error) {
+      pluginPatchStatus = {
+        loaded: false,
+        mode: "official",
+        pluginPatchEnabled: false
+      };
+      reportRendererEvent("plugin_patch_status_error", { message: String(error) });
+    }
+    return pluginPatchStatus;
   }
 
   function ensureStyles() {
@@ -455,6 +490,13 @@
         z-index: 2147483646;
       }
 
+      .codex-pilot-force-install-unlocked {
+        border-color: #ef4444 !important;
+        background: #fee2e2 !important;
+        color: #991b1b !important;
+        opacity: 1 !important;
+      }
+
       .codex-pilot-toast button {
         background: transparent;
         border: 0;
@@ -663,6 +705,162 @@
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation?.();
+  }
+
+  function reactFiberFrom(element) {
+    if (!element || typeof element !== "object") return null;
+    const fiberKey = Object.keys(element).find((key) => key.startsWith("__reactFiber"));
+    return fiberKey ? element[fiberKey] : null;
+  }
+
+  function authContextValueFrom(element) {
+    for (let fiber = reactFiberFrom(element); fiber; fiber = fiber.return) {
+      for (const value of [fiber.memoizedProps?.value, fiber.pendingProps?.value]) {
+        if (value && typeof value === "object" && typeof value.setAuthMethod === "function" && "authMethod" in value) {
+          return value;
+        }
+      }
+    }
+    return null;
+  }
+
+  function spoofChatGPTAuthMethod(element) {
+    const auth = authContextValueFrom(element);
+    if (!auth || auth.authMethod === "chatgpt") return false;
+    auth.setAuthMethod("chatgpt");
+    return true;
+  }
+
+  function pluginEntryButton() {
+    const byIcon = document.querySelector(`${selectors.pluginNavButton} ${selectors.pluginSvgPath}`)?.closest("button");
+    if (byIcon) return byIcon;
+    return Array.from(document.querySelectorAll(selectors.pluginNavButton))
+      .find((button) => /^(插件|Plugins)(\s+-\s+.*)?$/i.test((button.textContent || "").trim())) || null;
+  }
+
+  function labelUnlockedPluginEntry(button) {
+    const labelTextNode = Array.from(button.querySelectorAll("span, div")).reverse()
+      .flatMap((node) => Array.from(node.childNodes))
+      .find((node) => node.nodeType === 3 && /^(插件|Plugins)( - 已解锁| - Unlocked)?$/i.test((node.nodeValue || "").trim()));
+    if (!labelTextNode) return;
+    const current = (labelTextNode.nodeValue || "").trim();
+    labelTextNode.nodeValue = /^Plugins/i.test(current) ? "Plugins - Unlocked" : "插件 - 已解锁";
+  }
+
+  function clearPluginEntryUnlockLabel(button) {
+    const labelTextNode = Array.from(button.querySelectorAll("span, div")).reverse()
+      .flatMap((node) => Array.from(node.childNodes))
+      .find((node) => node.nodeType === 3 && /^(插件 - 已解锁|Plugins - Unlocked)$/i.test((node.nodeValue || "").trim()));
+    if (!labelTextNode) return;
+    labelTextNode.nodeValue = /^Plugins/i.test((labelTextNode.nodeValue || "").trim()) ? "Plugins" : "插件";
+  }
+
+  function enablePluginEntry() {
+    if (!pluginPatchEnabled()) return;
+    const pluginButton = pluginEntryButton();
+    if (!pluginButton) return;
+    spoofChatGPTAuthMethod(pluginButton);
+    pluginButton.disabled = false;
+    pluginButton.removeAttribute("disabled");
+    pluginButton.style.display = "";
+    pluginButton.querySelectorAll("*").forEach((node) => {
+      node.style.display = "";
+    });
+    labelUnlockedPluginEntry(pluginButton);
+    const reactPropsKey = Object.keys(pluginButton).find((key) => key.startsWith("__reactProps"));
+    if (reactPropsKey) {
+      pluginButton[reactPropsKey].disabled = false;
+    }
+    if (pluginButton.dataset.codexPilotPluginEnabled === "true") return;
+    pluginButton.dataset.codexPilotPluginEnabled = "true";
+    pluginButton.addEventListener("click", () => {
+      spoofChatGPTAuthMethod(pluginButton);
+    }, true);
+  }
+
+  function pluginInstallCandidates() {
+    const nodes = Array.from(document.querySelectorAll(selectors.disabledInstallButton));
+    return Array.from(new Set(nodes.map((node) => node.closest?.("button, [role='button']") || node)));
+  }
+
+  function installButtonLabel(element) {
+    return (element.textContent || "").trim();
+  }
+
+  function isInstallButtonLabel(text) {
+    return /^安装\s*/.test(text) || /^Install\s*/i.test(text) || text === "强制安装";
+  }
+
+  function patchReactDisabledProps(element) {
+    Object.keys(element)
+      .filter((key) => key.startsWith("__reactProps"))
+      .forEach((key) => {
+        const props = element[key];
+        if (!props || typeof props !== "object") return;
+        props.disabled = false;
+        props["aria-disabled"] = false;
+        props["data-disabled"] = undefined;
+      });
+  }
+
+  function clearDisabledState(element) {
+    if (!(element instanceof HTMLElement)) return;
+    if ("disabled" in element) element.disabled = false;
+    element.removeAttribute("disabled");
+    element.removeAttribute("aria-disabled");
+    element.removeAttribute("data-disabled");
+    element.removeAttribute("inert");
+    element.classList.remove("disabled", "opacity-50", "cursor-not-allowed", "pointer-events-none");
+    element.classList.add("codex-pilot-force-install-unlocked");
+    element.style.pointerEvents = "auto";
+    element.style.opacity = "";
+    element.style.cursor = "pointer";
+    element.tabIndex = 0;
+    patchReactDisabledProps(element);
+  }
+
+  function installButtonUnlockNodes(button) {
+    const nodes = [button];
+    button.querySelectorAll?.("button, [role='button'], [disabled], [aria-disabled], [data-disabled], .cursor-not-allowed, .pointer-events-none")
+      .forEach((node) => nodes.push(node));
+    let parent = button.parentElement;
+    for (let depth = 0; parent && depth < 3; depth += 1, parent = parent.parentElement) {
+      if (parent.matches?.("button, [role='button'], [disabled], [aria-disabled], [data-disabled], .cursor-not-allowed, .pointer-events-none")) {
+        nodes.push(parent);
+      }
+    }
+    return Array.from(new Set(nodes));
+  }
+
+  function installForcedInstallGuard(button) {
+    if (button.dataset.codexPilotForceInstallUnlocked === "true") return;
+    button.dataset.codexPilotForceInstallUnlocked = "true";
+    const keepUnlocked = () => installButtonUnlockNodes(button).forEach(clearDisabledState);
+    ["pointerdown", "mousedown", "mouseup", "click", "focus"].forEach((eventName) => {
+      button.addEventListener(eventName, keepUnlocked, true);
+    });
+  }
+
+  function unblockButtonElement(button) {
+    installButtonUnlockNodes(button).forEach(clearDisabledState);
+    installForcedInstallGuard(button);
+  }
+
+  function unblockPluginInstallButtons() {
+    if (!pluginPatchEnabled()) return;
+    pluginInstallCandidates().forEach((button) => {
+      const text = installButtonLabel(button);
+      if (!isInstallButtonLabel(text)) return;
+      unblockButtonElement(button);
+    });
+  }
+
+  function clearPluginPatchArtifacts() {
+    const pluginButton = pluginEntryButton();
+    if (pluginButton) {
+      delete pluginButton.dataset.codexPilotPluginEnabled;
+      clearPluginEntryUnlockLabel(pluginButton);
+    }
   }
 
   function installRowActionEvents(button, onActivate) {
@@ -1621,6 +1819,12 @@
   }
 
   function startRefreshLoop() {
+    if (pluginPatchEnabled()) {
+      enablePluginEntry();
+      unblockPluginInstallButtons();
+    } else {
+      clearPluginPatchArtifacts();
+    }
     if (enhancementSettings.inlineActions) refreshSessionActions();
     if (enhancementSettings.scrollRestore) installScrollRestore();
     if (enhancementSettings.timeline) refreshTimelineSoon();
@@ -1630,6 +1834,10 @@
           observer.disconnect();
           return;
         }
+        if (pluginPatchEnabled()) {
+          enablePluginEntry();
+          unblockPluginInstallButtons();
+        }
         if (enhancementSettings.inlineActions) refreshSessionActions();
         if (enhancementSettings.timeline) refreshTimelineSoon();
       });
@@ -1638,6 +1846,10 @@
     if (typeof window.setInterval === "function") {
       window.setInterval(() => {
         if (!isActiveBoot()) return;
+        if (pluginPatchEnabled()) {
+          enablePluginEntry();
+          unblockPluginInstallButtons();
+        }
         if (enhancementSettings.inlineActions) refreshSessionActions();
         if (enhancementSettings.timeline) renderTimeline();
       }, 1500);
@@ -1646,6 +1858,7 @@
 
   async function bootCodexPilot() {
     await loadEnhancementSettings();
+    await loadPluginPatchStatus();
     if (!enhancementSettings.enabled) {
       reportRendererEvent("enhancement_disabled", {});
       return;
@@ -1659,7 +1872,11 @@
       createMenu();
       startRefreshLoop();
     }
-    reportRendererEvent("loaded", { helper_port: helperPort, enhancement_settings: enhancementSettings });
+    reportRendererEvent("loaded", {
+      helper_port: helperPort,
+      enhancement_settings: enhancementSettings,
+      plugin_patch_status: pluginPatchStatus
+    });
   }
 
   bootCodexPilot();
