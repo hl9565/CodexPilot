@@ -2,63 +2,33 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import {
   Activity,
-  BadgeCheck,
   Bot,
-  CheckCircle2,
-  Clipboard,
-  Download,
-  Gauge,
   History,
-  Trash2,
   LogIn,
   Moon,
   Play,
   RefreshCw,
-  Settings,
   Stethoscope,
   Sun,
   Terminal,
-  Eye,
-  EyeOff,
-  Network,
   RotateCcw,
-  Plus,
-  CircleHelp,
 } from "lucide-react";
+import { ProgressDialog, canRunLaunchAction, loadInitialTheme } from "./appSupport";
 import { callBackend, isUiPreviewMode } from "./backend";
 import { resolveAutoLaunchAction } from "./autoLaunch";
-import { Distribution, Metric, Row } from "./components/primitives";
 import { DiagnosticsView } from "./views/DiagnosticsView";
 import { LaunchView } from "./views/LaunchView";
 import { OverviewView } from "./views/OverviewView";
 import { ProviderView } from "./views/ProviderView";
 import { RecycleBinView } from "./views/RecycleBinView";
 import {
-  type AuthenticatedBehavior,
   type BackendStatus,
-  type CcsImportResult,
   type CcsProviderSnapshot,
   type DiagnosticsSnapshot,
-  type EnhancementSettings,
   type LaunchSnapshot,
-  type OfficialSnapshotImportResult,
-  type OfficialSnapshotPrepareResult,
-  type ProviderCount,
-  type ProviderProfile,
-  type ProviderProfileSaveResponse,
   type ProviderSnapshot,
-  type ProviderSyncSnapshot,
-  type RecycleBinBatchResponse,
-  type RecycleBinEntry,
   type RecycleBinSnapshot,
-  type RunMode,
-  type SessionZipExportResult,
-  type SessionZipImportMode,
-  type SessionZipImportResult,
-  type SessionZipInspectResult,
-  THEME_STORAGE_KEY,
   type Theme,
-  type UpstreamProtocol,
   type ViewId,
 } from "./types";
 import "./styles.css";
@@ -70,17 +40,6 @@ const views: Array<{ id: ViewId; label: string; icon: React.ElementType }> = [
   { id: "sessions", label: "对话维护", icon: History },
   { id: "diagnostics", label: "诊断", icon: Stethoscope },
 ];
-
-function canRunLaunchAction(launch: LaunchSnapshot | null): boolean {
-  if (!launch) return false;
-  return ["launch", "reinject", "restart", "running"].includes(launch.actionKind);
-}
-
-function backendStatusLabel(status: BackendStatus | null): string {
-  if (!status) return "未连接";
-  if (status.status === "running") return "已连接";
-  return status.status || "未连接";
-}
 
 function App() {
   const [activeView, setActiveView] = React.useState<ViewId>("overview");
@@ -376,37 +335,6 @@ function App() {
         </div>
       )}
     </main>
-  );
-}
-
-function runModeLabel(mode: RunMode): string {
-  if (mode === "hybridApi") return "混合中转";
-  if (mode === "api") return "传统中转";
-  return "官方通道";
-}
-
-function shortId(value: string) {
-  if (!value) return "-";
-  if (value.length <= 18) return value;
-  return `${value.slice(0, 8)}…${value.slice(-8)}`;
-}
-
-function loadInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
-  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
-}
-
-function ProgressDialog({ message }: { message: string }) {
-  return (
-    <div className="progressOverlay" role="status" aria-live="polite">
-      <div className="progressDialog">
-        <strong>{message}</strong>
-        <div className="progressTrack">
-          <span />
-        </div>
-        <p>正在处理，请稍候。</p>
-      </div>
-    </div>
   );
 }
 
