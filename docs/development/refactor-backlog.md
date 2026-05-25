@@ -19,7 +19,7 @@
 | T04   | 后端事件推送 + 前端订阅           | P1     | 2 h    | DONE |
 | T05   | `main.tsx` 机械拆分               | P1     | 2-4 h  | DONE |
 | T06   | 引入 `ManagerError` 类型（试点）  | P1     | 半天   | TODO |
-| T07   | 引入 `tracing` 框架               | P2     | 1 h    | TODO |
+| T07   | 引入 `tracing` 框架               | P2     | 1 h    | DONE |
 | T08   | Mutex 中毒处理                    | P2     | 1 h    | TODO |
 | T09   | `storage.rs` 拆分调研（先不动手） | P2     | 1 h    | TODO |
 | T10   | `provider.rs` 事务性调研          | P2     | 1 h    | TODO |

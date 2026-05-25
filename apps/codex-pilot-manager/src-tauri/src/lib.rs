@@ -140,6 +140,13 @@ struct SessionZipExportRequest {
 }
 
 pub fn run() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            std::env::var("CODEX_PILOT_LOG")
+                .unwrap_or_else(|_| "info,codex_pilot=debug".into()),
+        )
+        .init();
+
     let app = tauri::Builder::default()
         .manage(ManagerState {
             launch_state: Mutex::new(LaunchState::Idle),
