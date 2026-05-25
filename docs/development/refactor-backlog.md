@@ -16,7 +16,7 @@
 | T01   | 修复 `std::thread::sleep` 阻塞    | P0     | 5 min  | DONE |
 | T02   | Tauri 命令批量异步化              | P0     | 30 min | DONE |
 | T03   | 新建共享 `http_client` 模块       | P0     | 1 h    | DONE（验收已补完 by T11） |
-| T04   | 后端事件推送 + 前端订阅           | P1     | 2 h    | TODO |
+| T04   | 后端事件推送 + 前端订阅           | P1     | 2 h    | DONE |
 | T05   | `main.tsx` 机械拆分               | P1     | 2-4 h  | DONE |
 | T06   | 引入 `ManagerError` 类型（试点）  | P1     | 半天   | TODO |
 | T07   | 引入 `tracing` 框架               | P2     | 1 h    | TODO |

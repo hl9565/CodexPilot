@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { listen } from "@tauri-apps/api/event";
 import {
   Activity,
   Bot,
@@ -133,6 +134,23 @@ function App() {
       }
       window.removeEventListener("focus", refreshWhenVisible);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refresh]);
+
+  React.useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    listen("launch_state_changed", () => {
+      refresh(true);
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, [refresh]);
 

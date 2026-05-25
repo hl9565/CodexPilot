@@ -7,6 +7,19 @@ use crate::commands::launch_helpers::{
     request_codex_quit,
 };
 
+fn emit_launch_state(app: &tauri::AppHandle, new_state: &LaunchState) {
+    use tauri::Emitter;
+    if let Err(e) = app.emit(
+        "launch_state_changed",
+        crate::commands::launch_helpers::launch_state_label(new_state),
+    ) {
+        let _ = codex_pilot_core::diagnostic_log::append(
+            "launch.emit_failed",
+            serde_json::json!({ "error": e.to_string() }),
+        );
+    }
+}
+
 pub(crate) fn resolve_launcher_path() -> Result<std::path::PathBuf, String> {
     let exe = std::env::current_exe().map_err(|error| format!("无法定位管理器：{error}"))?;
     let dir = exe
@@ -98,6 +111,7 @@ pub(crate) async fn launch_snapshot(
 #[tauri::command]
 pub(crate) async fn launch_codex(
     state: tauri::State<'_, ManagerState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     let prefs = load_launch_preferences();
     let options = launch_options_from_preferences(&prefs);
@@ -111,12 +125,15 @@ pub(crate) async fn launch_codex(
                 "debug_port_connectable": codex_pilot_core::ports::can_connect_loopback_port(options.debug_port)
             }),
         )?;
-        let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
-        *current = LaunchState::Running;
+        {
+            let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
+            *current = LaunchState::Running;
+        }
+        emit_launch_state(&app, &LaunchState::Running);
         return Ok("CodexPilot 已在运行中。".to_string());
     }
     if codex_pilot_core::ports::can_connect_loopback_port(options.debug_port) {
-        return inject_existing_codex(&state, &prefs, options.debug_port, options.helper_port)
+        return inject_existing_codex(&state, &app, &prefs, options.debug_port, options.helper_port)
             .await;
     }
     if cached_codex_process_running(&state).await {
@@ -125,34 +142,37 @@ pub(crate) async fn launch_codex(
                 .to_string(),
         );
     }
-    spawn_launcher(&state, &prefs).await
+    spawn_launcher(&state, &app, &prefs).await
 }
 
 #[tauri::command]
 pub(crate) async fn reinject_codex(
     state: tauri::State<'_, ManagerState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     let prefs = load_launch_preferences();
     let options = launch_options_from_preferences(&prefs);
     if !codex_pilot_core::ports::can_connect_loopback_port(options.debug_port) {
         return Err("未检测到 Codex 调试端口，无法重新注入。".to_string());
     }
-    inject_existing_codex(&state, &prefs, options.debug_port, options.helper_port).await
+    inject_existing_codex(&state, &app, &prefs, options.debug_port, options.helper_port).await
 }
 
 #[tauri::command]
 pub(crate) async fn restart_codex_and_inject(
     state: tauri::State<'_, ManagerState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     request_codex_quit()?;
     set_cached_codex_process_running(&state, false);
     tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
     let prefs = load_launch_preferences();
-    spawn_launcher(&state, &prefs).await
+    spawn_launcher(&state, &app, &prefs).await
 }
 
 async fn inject_existing_codex(
     state: &tauri::State<'_, ManagerState>,
+    app: &tauri::AppHandle,
     prefs: &LaunchPreferences,
     debug_port: u16,
     helper_port: u16,
@@ -161,6 +181,7 @@ async fn inject_existing_codex(
         let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
         *current = LaunchState::Launching;
     }
+    emit_launch_state(app, &LaunchState::Launching);
     match inject_running_codex_for_manager(debug_port, helper_port).await {
         Ok(()) => {
             codex_pilot_core::status::write_status(&codex_pilot_core::status::BackendStatus {
@@ -172,6 +193,7 @@ async fn inject_existing_codex(
                 let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
                 *current = LaunchState::Running;
             }
+            emit_launch_state(app, &LaunchState::Running);
             set_cached_codex_process_running(state, true);
             Ok(auto_sync_sessions_after_launch("reinject", prefs).await)
         }
@@ -180,6 +202,7 @@ async fn inject_existing_codex(
             if let Ok(mut current) = state.launch_state.lock() {
                 *current = LaunchState::Failed(message.clone());
             }
+            emit_launch_state(app, &LaunchState::Failed(message.clone()));
             Err(message)
         }
     }
@@ -244,8 +267,10 @@ async fn inject_running_codex_for_manager(debug_port: u16, helper_port: u16) -> 
 
 async fn spawn_launcher(
     state: &tauri::State<'_, ManagerState>,
+    app: &tauri::AppHandle,
     prefs: &LaunchPreferences,
 ) -> Result<String, String> {
+    let mut emitted_idle = false;
     {
         let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
         if matches!(*current, LaunchState::Launching | LaunchState::Running) {
@@ -253,9 +278,17 @@ async fn spawn_launcher(
                 return Ok("CodexPilot 已在启动或运行中。".to_string());
             }
             *current = LaunchState::Idle;
+            emitted_idle = true;
         }
+    }
+    if emitted_idle {
+        emit_launch_state(app, &LaunchState::Idle);
+    }
+    {
+        let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
         *current = LaunchState::Launching;
     }
+    emit_launch_state(app, &LaunchState::Launching);
 
     let launcher = match resolve_launcher_path() {
         Ok(path) => path,
@@ -263,6 +296,7 @@ async fn spawn_launcher(
             if let Ok(mut current) = state.launch_state.lock() {
                 *current = LaunchState::Failed(message.clone());
             }
+            emit_launch_state(app, &LaunchState::Failed(message.clone()));
             return Err(message);
         }
     };
@@ -274,6 +308,7 @@ async fn spawn_launcher(
         if let Ok(mut current) = state.launch_state.lock() {
             *current = LaunchState::Failed(message.clone());
         }
+        emit_launch_state(app, &LaunchState::Failed(message.clone()));
         return Err(message);
     }
 
@@ -284,6 +319,7 @@ async fn spawn_launcher(
                 let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
                 *current = LaunchState::Running;
             }
+            emit_launch_state(app, &LaunchState::Running);
             set_cached_codex_process_running(state, true);
             Ok(auto_sync_sessions_after_launch("launch", prefs).await)
         }
@@ -291,6 +327,7 @@ async fn spawn_launcher(
             if let Ok(mut current) = state.launch_state.lock() {
                 *current = LaunchState::Failed(message.clone());
             }
+            emit_launch_state(app, &LaunchState::Failed(message.clone()));
             Err(message)
         }
     }
