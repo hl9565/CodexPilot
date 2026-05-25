@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { callBackend, isUiPreviewMode } from "./backend";
 import { resolveAutoLaunchAction } from "./autoLaunch";
+import { Distribution, Metric, Row } from "./components/primitives";
 import {
   type AuthenticatedBehavior,
   type BackendStatus,
@@ -1963,39 +1964,6 @@ function formatDiagnosticTimestamp(value: unknown): string {
     ".",
     pad(date.getMilliseconds(), 3),
   ].join("");
-}
-
-function Distribution({ title, items }: { title: string; items: ProviderCount[] }) {
-  return (
-    <div className="distributionBox">
-      <strong>{title}</strong>
-      <div>
-        {items.length ? items.map((item) => (
-          <span className="providerChip" key={item.provider}>
-            {item.provider || "空"} {item.count}
-          </span>
-        )) : <span className="bodyText">无</span>}
-      </div>
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="row">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
 }
 
 function shortId(value: string) {
