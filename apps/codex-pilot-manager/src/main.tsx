@@ -57,6 +57,7 @@ function App() {
   const [toast, setToast] = React.useState("");
   const [progressMessage, setProgressMessage] = React.useState("");
   const [launching, setLaunching] = React.useState(false);
+  const [restartConfirming, setRestartConfirming] = React.useState(false);
   const autoLaunchAttemptedRef = React.useRef(false);
   const autoLaunchFailedRef = React.useRef(false);
   const launchRequestIdRef = React.useRef(0);
@@ -71,6 +72,10 @@ function App() {
     const timer = window.setTimeout(() => setToast(""), 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  React.useEffect(() => {
+    setRestartConfirming(false);
+  }, [launch?.actionKind, launching]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -202,10 +207,12 @@ function App() {
       return;
     }
     if (actionKind === "restart") {
-      const confirmed = window.confirm(
-        "当前 Codex 不是通过 CodexPilot 启动，无法直接注入。重启会关闭 Codex 当前窗口，未保存输入可能丢失。是否继续？",
-      );
-      if (!confirmed) return;
+      if (!restartConfirming) {
+        setRestartConfirming(true);
+        notify("当前 Codex 非 CodexPilot 启动，再次点击按钮以确认重启注入（未保存输入可能丢失）");
+        return;
+      }
+      setRestartConfirming(false);
     }
     const command =
       actionKind === "reinject"
@@ -292,7 +299,13 @@ function App() {
                 ) : (
                   <Play size={16} />
                 )}
-                {launching ? "处理中" : launch?.actionKind === "running" ? "已连接" : launch?.actionLabel ?? "启动 Codex"}
+                {launching
+                  ? "处理中"
+                  : launch?.actionKind === "running"
+                    ? "已连接"
+                    : launch?.actionKind === "restart" && restartConfirming
+                      ? "再次点击确认"
+                      : launch?.actionLabel ?? "启动 Codex"}
               </button>
             )}
           </div>

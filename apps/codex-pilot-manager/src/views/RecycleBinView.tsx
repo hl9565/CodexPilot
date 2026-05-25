@@ -38,6 +38,7 @@ export function RecycleBinView({
   const [syncInspecting, setSyncInspecting] = React.useState(false);
   const [syncBusy, setSyncBusy] = React.useState(false);
   const [syncConfirming, setSyncConfirming] = React.useState(false);
+  const [deleteConfirming, setDeleteConfirming] = React.useState(false);
   const selectedEntries = entries.filter((entry) => selected.includes(entry.token));
   const recoverableSelected = selectedEntries.filter((entry) => entry.recoverable);
   const allSelected = entries.length > 0 && selected.length === entries.length;
@@ -60,6 +61,10 @@ export function RecycleBinView({
   React.useEffect(() => {
     setSelected((current) => current.filter((token) => entries.some((entry) => entry.token === token)));
   }, [entries]);
+
+  React.useEffect(() => {
+    setDeleteConfirming(false);
+  }, [selected.length, entries]);
 
   React.useEffect(() => {
     refreshProviderSync("CodexPilot")
@@ -108,8 +113,12 @@ export function RecycleBinView({
 
   const deleteSelected = () => {
     if (!selected.length || pendingAction) return;
-    const confirmed = window.confirm(`确认永久删除选中的 ${selected.length} 条记录？删除后不能恢复。`);
-    if (!confirmed) return;
+    if (!deleteConfirming) {
+      setDeleteConfirming(true);
+      onMessage(`再次点击"永久删除"以确认删除 ${selected.length} 条记录（不可恢复）`);
+      return;
+    }
+    setDeleteConfirming(false);
     setPendingAction("delete");
     onProgress("正在永久删除回收站记录");
     onMessage(`正在永久删除 ${selected.length} 条记录`);
@@ -342,7 +351,11 @@ export function RecycleBinView({
             onClick={deleteSelected}
             type="button"
           >
-            {pendingAction === "delete" ? "删除中" : "永久删除"}
+            {pendingAction === "delete"
+              ? "删除中"
+              : deleteConfirming
+                ? "再次点击确认"
+                : "永久删除"}
           </button>
         </div>
       </div>

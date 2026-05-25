@@ -27,6 +27,7 @@
 | T12   | 补齐 `protocol_proxy_transport.rs` 漏掉的 3 处 `reqwest::Client::new()` | P1 | 10 min | DONE |
 | T13   | 修复 `diagnostic_log` 并行测试 flaky | P2 | 30 min | TODO |
 | T14   | 后端连接状态口径统一 + UI 文案修复 + ProgressDialog 改非阻塞 chip | P1 | 45 min | DONE |
+| T14b  | 修复 Tauri 中 `window.confirm` 失效导致的前端阻塞 | P1 | 20 min | DONE |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
