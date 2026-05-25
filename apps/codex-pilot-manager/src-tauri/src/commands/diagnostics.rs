@@ -14,20 +14,22 @@ pub(crate) async fn diagnostics_snapshot() -> Result<DiagnosticsSnapshot, String
             checks: vec![
                 DiagnosticCheck {
                     name: "后端状态".to_string(),
-                    status: if helper_reachable || status_exists {
+                    status: if helper_reachable {
                         "ok"
+                    } else if status_exists {
+                        "warning"
                     } else {
                         "missing"
                     }
                     .to_string(),
                     detail: if helper_reachable {
                         format!(
-                            "本地连接服务已连接；状态文件仅作辅助手段。路径：{}",
+                            "本地连接服务已连接；状态文件路径：{}",
                             status_path.to_string_lossy()
                         )
                     } else if status_exists {
                         format!(
-                            "未检测到本地连接服务，但发现状态文件：{}。这通常说明后端曾成功启动，可结合启动页再确认当前连接。",
+                            "本地连接服务无响应，但发现旧状态文件：{}。后端可能已退出或端口配置不一致，请回到启动页点'重新注入'。",
                             status_path.to_string_lossy()
                         )
                     } else {

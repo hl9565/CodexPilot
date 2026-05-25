@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {
   Activity,
   Bot,
+  CheckCircle2,
   History,
   LogIn,
   Moon,
@@ -28,6 +29,7 @@ import {
   type LaunchSnapshot,
   type ProviderSnapshot,
   type RecycleBinSnapshot,
+  THEME_STORAGE_KEY,
   type Theme,
   type ViewId,
 } from "./types";
@@ -283,8 +285,14 @@ function App() {
             </button>
             {(activeView === "overview" || activeView === "launch") && (
               <button className="primary" disabled={launching || !canRunLaunchAction(launch)} onClick={handleLaunch} type="button">
-                {launch?.actionKind === "reinject" || launch?.actionKind === "restart" ? <RotateCcw size={16} /> : <Play size={16} />}
-                {launching ? "处理中" : launch?.actionLabel ?? "启动 Codex"}
+                {launch?.actionKind === "running" ? (
+                  <CheckCircle2 size={16} />
+                ) : launch?.actionKind === "reinject" || launch?.actionKind === "restart" ? (
+                  <RotateCcw size={16} />
+                ) : (
+                  <Play size={16} />
+                )}
+                {launching ? "处理中" : launch?.actionKind === "running" ? "已连接" : launch?.actionLabel ?? "启动 Codex"}
               </button>
             )}
           </div>

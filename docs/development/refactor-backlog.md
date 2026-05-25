@@ -26,6 +26,7 @@
 | T11   | 修复 `lib.rs` 测试 `default_upstream_protocol` import 遗漏 | P0 | 5 min | DONE |
 | T12   | 补齐 `protocol_proxy_transport.rs` 漏掉的 3 处 `reqwest::Client::new()` | P1 | 10 min | DONE |
 | T13   | 修复 `diagnostic_log` 并行测试 flaky | P2 | 30 min | TODO |
+| T14   | 后端连接状态口径统一 + UI 文案修复 + ProgressDialog 改非阻塞 chip | P1 | 45 min | DONE |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
@@ -656,3 +657,146 @@ T03 已经在 crates/codex-pilot-core/src/http_client.rs 建好共享 reqwest::C
 ```
 
 **验收**：拿到调研报告；由维护者选定方案后再起 T13b。
+
+---
+
+### T14 · 后端连接状态口径统一 + UI 文案修复 + ProgressDialog 改非阻塞 chip
+
+**问题**：UI 一组相关显示 bug，本质都是"用户能否在长任务进行中继续操作"+ "状态显示口径不统一"。一起修：
+
+1. **诊断页"后端状态"**（`apps/codex-pilot-manager/src-tauri/src/commands/diagnostics.rs:17-32`）：
+   - 当前逻辑：`status="ok"` 条件是 `helper_reachable || status_exists`
+   - 当 `helper_reachable=false && status_exists=true` 时：status 仍是 "ok"，但 detail 文案明确说"未检测到本地连接服务"——自相矛盾
+   - 真实语义：状态文件可能是上次启动残留，**helper 端口不通就不应该算 OK**
+
+2. **启动页"连接方式"**（`apps/codex-pilot-manager/src/views/LaunchView.tsx:37`）：
+   - 当前：`const connectionState = launch?.debugReachable ? "可直接注入" : launch?.codexRunning ? "需要重启注入" : "可启动";`
+   - 完全只看 debugReachable，没区分"完全已连接"和"helper 未通但 debug 通"
+   - 而后端已经算好 `actionKind`（running/launching/reinject/restart/launch/unavailable），前端不该再造一遍轮子
+
+3. **右上角主按钮**（`apps/codex-pilot-manager/src/main.tsx:286-288`）：
+   - 当 actionKind="running" 时，按钮文字"已运行" + Play 图标 + enabled（因为 "running" 在 canRunLaunchAction 白名单里）
+   - 视觉上像可点的启动按钮，点了走快速返回路径无害但毫无意义；语义应为状态指示而非可点按钮
+
+4. **ProgressDialog 全屏遮罩拦截所有点击**（`apps/codex-pilot-manager/src/styles.css:467-475` + `apps/codex-pilot-manager/src/appSupport.tsx:21-33`）：
+   - 当前 `.progressOverlay` 是 `position:fixed; inset:0; z-index:1100`，**显示期间盖住整个 UI**
+   - 后端 `export_session_zip` / `sync_provider_sessions` 等已是 spawn_blocking async，后端不阻塞；**是前端自己用 modal 把自己锁死了**
+   - 后果：用户在导出过程中点"永久删除"按钮根本接收不到 click（被遮罩拦截）→ 误以为按钮坏了
+   - 真实情况：当前所有用 onProgress 的操作都是并发安全的后端任务，不需要 modal 遮罩
+
+**Codex Prompt**：
+
+```
+修复 CodexPilot 一组 UI 状态显示与交互阻塞问题。本任务范围只在这 5 个文件：
+
+文件 1: apps/codex-pilot-manager/src-tauri/src/commands/diagnostics.rs
+文件 2: apps/codex-pilot-manager/src/views/LaunchView.tsx
+文件 3: apps/codex-pilot-manager/src/main.tsx
+文件 4: apps/codex-pilot-manager/src/appSupport.tsx
+文件 5: apps/codex-pilot-manager/src/styles.css
+
+【改动 1】diagnostics.rs 后端状态语义修正
+当前 line 17-32 的逻辑：status="ok" 当 helper_reachable || status_exists。
+改为三档：
+- helper_reachable=true → status="ok", detail="本地连接服务已连接；状态文件路径：{path}"
+- helper_reachable=false && status_exists=true → status="warning", detail="本地连接服务无响应，但发现旧状态文件：{path}。后端可能已退出或端口配置不一致，请回到启动页点'重新注入'。"
+- helper_reachable=false && !status_exists → status="missing", detail="未检测到本地连接服务，且状态文件不存在：{path}"
+
+注意 DiagnosticCheck.status 当前只用 ok/warning/missing 三个字符串。如果 DiagnosticCheck type 或前端 status 渲染不支持 "warning"，先用现有支持的 status 类型（看现有其他 check 如"中转设置"和"Codex 应用探测"用的字符串）。如不支持 warning，用 "missing"+清楚的 detail 也可以。
+
+【改动 2】LaunchView.tsx:37 用后端 actionKind 派生 connectionState
+把
+    const connectionState = launch?.debugReachable ? "可直接注入" : launch?.codexRunning ? "需要重启注入" : "可启动";
+替换为基于 launch?.actionKind 的 switch（或三元链）：
+    const connectionState = (() => {
+      switch (launch?.actionKind) {
+        case "running":      return "已连接";
+        case "launching":    return "启动中";
+        case "reinject":     return "可直接注入";
+        case "restart":      return "需要重启注入";
+        case "launch":       return "可启动";
+        case "unavailable":  return "未配置";
+        default:             return "未知";
+      }
+    })();
+
+不要改 LaunchView 其他任何代码。
+
+【改动 3 + 4】右上角按钮在 actionKind="running" 时改为禁用状态指示
+appSupport.tsx 修改 canRunLaunchAction：把 "running" 从白名单移除：
+    return ["launch", "reinject", "restart"].includes(launch.actionKind);
+
+然后 main.tsx 的按钮 JSX（约 line 286-289）做小幅调整：
+- 图标：actionKind === "running" 时用 lucide-react 的 CheckCircle2，其他保持原逻辑
+- 文字：launching → "处理中"；actionKind === "running" → "已连接"；其他用 launch?.actionLabel
+- 不需要改 disabled 逻辑（canRunLaunchAction 移除 running 后会自然 disabled）
+
+记得在 main.tsx import 处新增 CheckCircle2。
+
+【改动 5】ProgressDialog 改成右下角非阻塞 chip
+
+styles.css：
+- 删除整段 `.progressOverlay { ... }`（约 line 467-475）
+- 新增 `.progressChip` 样式：
+    .progressChip {
+      animation: toastIn 140ms ease-out;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 14px 32px var(--shadow-strong);
+      bottom: 70px;        /* 让出底部 22px 给 .appToast */
+      display: grid;
+      gap: 8px;
+      max-width: min(360px, calc(100vw - 36px));
+      padding: 12px 14px;
+      pointer-events: none;
+      position: fixed;
+      right: 22px;
+      z-index: 1000;
+    }
+- 把 `.progressDialog` 和 `.progressDialog strong` / `.progressDialog p` / `.progressTrack` 等子选择器全部改成 `.progressChip *` 对应版本（或者直接复用现有 progressTrack 动画）。
+  关键：取消"模态阴影"、取消居中布局、取消全屏覆盖。
+
+appSupport.tsx 修改 ProgressDialog 组件（约 line 21-33）：
+- JSX 外层 div 的 className 从 "progressOverlay" 改为 "progressChip"
+- 删除内层 .progressDialog 包装（直接渲染 strong + progressTrack 即可）
+- 不需要 aria-live 还是保留作 a11y
+- 组件名可保留 ProgressDialog（导出名不变，避免 main.tsx import 改动），但实际渲染的是 chip 样式
+
+示例改后：
+    export function ProgressDialog({ message }: { message: string }) {
+      return (
+        <div className="progressChip" role="status" aria-live="polite">
+          <strong>{message}</strong>
+          <div className="progressTrack"><span /></div>
+        </div>
+      );
+    }
+
+不要做的事：
+- 不要改 launch_action_kind / launch_action_label 后端逻辑（actionKind 已经对了）
+- 不要改 backendStatusLabel
+- 不要改其他 view 文件
+- 不要改 autoLaunch.ts 或 autoLaunch.test.ts
+- 不要把 ProgressDialog 改名（保持导出名兼容）
+- 不要改任何 onProgress() 调用点（chip 应替换为 modal 透明无痛升级）
+
+完成后给我：
+1. git diff --stat（应只看到 5 个源文件 + backlog 文档）
+2. 改动后的 LaunchView.tsx:37 那段 connectionState 完整代码
+3. 改动后的 diagnostics.rs 后端状态 check 完整段落
+4. 改动后的 main.tsx 按钮 JSX
+5. 改动后的 appSupport.tsx canRunLaunchAction + ProgressDialog 完整代码
+6. 改动后的 styles.css 中 .progressChip 完整定义
+7. cargo check -p codex-pilot-manager 输出
+8. cd apps/codex-pilot-manager && npm test 输出
+9. npm run build 输出
+10. 把 backlog T14 行 TODO 改 DONE
+```
+
+**验收**：
+- 当 helper 端口通时：启动页"后端：已连接"、"连接方式：已连接"，诊断页"后端状态：OK"，右上按钮"已连接"+CheckCircle2 图标+disabled
+- 当 helper 端口不通但 status 文件存在：诊断页"后端状态：warning（或 missing）"，detail 清楚说明"后端可能已退出"
+- 当真正未启动：右上按钮"启动 Codex"+Play+enabled
+- 触发导出 ZIP / 同步对话等长任务：右下角出现一个 chip 显示进度，**同时其他按钮（永久删除、刷新等）仍可点击**
+- chip 不遮挡 toast（toast 在底部 22px、chip 在底部 70px 不重叠）

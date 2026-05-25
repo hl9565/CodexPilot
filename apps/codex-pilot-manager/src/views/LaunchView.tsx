@@ -34,7 +34,24 @@ export function LaunchView({
   const [enhancementMessage, setEnhancementMessage] = React.useState("");
   const [enhancementSaving, setEnhancementSaving] = React.useState(false);
   const backendState = backendStatusLabel(status);
-  const connectionState = launch?.debugReachable ? "可直接注入" : launch?.codexRunning ? "需要重启注入" : "可启动";
+  const connectionState = (() => {
+    switch (launch?.actionKind) {
+      case "running":
+        return "已连接";
+      case "launching":
+        return "启动中";
+      case "reinject":
+        return "可直接注入";
+      case "restart":
+        return "需要重启注入";
+      case "launch":
+        return "可启动";
+      case "unavailable":
+        return "未配置";
+      default:
+        return "未知";
+    }
+  })();
 
   React.useEffect(() => {
     if (!launch) return;

@@ -4,7 +4,7 @@ import { THEME_STORAGE_KEY } from "./types";
 
 export function canRunLaunchAction(launch: LaunchSnapshot | null): boolean {
   if (!launch) return false;
-  return ["launch", "reinject", "restart", "running"].includes(launch.actionKind);
+  return ["launch", "reinject", "restart"].includes(launch.actionKind);
 }
 
 export function backendStatusLabel(status: BackendStatus | null): string {
@@ -20,13 +20,10 @@ export function loadInitialTheme(): Theme {
 
 export function ProgressDialog({ message }: { message: string }) {
   return (
-    <div className="progressOverlay" role="status" aria-live="polite">
-      <div className="progressDialog">
-        <strong>{message}</strong>
-        <div className="progressTrack">
-          <span />
-        </div>
-        <p>正在处理，请稍候。</p>
+    <div className="progressChip" role="status" aria-live="polite">
+      <strong>{message}</strong>
+      <div className="progressTrack">
+        <span />
       </div>
     </div>
   );

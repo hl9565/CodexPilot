@@ -464,37 +464,26 @@ h2 {
   z-index: 1000;
 }
 
-.progressOverlay {
-  align-items: center;
-  background: var(--overlay-bg);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  position: fixed;
-  z-index: 1100;
-}
-
-.progressDialog {
-  animation: dialogIn 120ms ease-out;
+.progressChip {
+  animation: toastIn 140ms ease-out;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 22px 60px var(--shadow-dialog);
+  box-shadow: 0 14px 32px var(--shadow-strong);
+  bottom: 70px;
   display: grid;
-  gap: 10px;
-  min-width: min(360px, calc(100vw - 36px));
-  padding: 18px;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 36px));
+  padding: 12px 14px;
+  pointer-events: none;
+  position: fixed;
+  right: 22px;
+  z-index: 1000;
 }
 
-.progressDialog strong {
+.progressChip strong {
   color: var(--app-text-strong);
   font-size: 14px;
-}
-
-.progressDialog p {
-  color: var(--app-muted-3);
-  font-size: 12px;
-  line-height: 1.45;
 }
 
 .progressTrack {
@@ -527,17 +516,6 @@ h2 {
   }
 }
 
-@keyframes dialogIn {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
 
 @keyframes progressSweep {
   0% {
