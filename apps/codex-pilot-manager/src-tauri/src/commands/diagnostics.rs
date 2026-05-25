@@ -1,44 +1,90 @@
 use super::super::*;
 use crate::commands::launch::resolve_launcher_path;
+use crate::commands::launch_helpers::launch_action_kind;
 
 #[tauri::command]
-pub(crate) async fn diagnostics_snapshot() -> Result<DiagnosticsSnapshot, String> {
-    tauri::async_runtime::spawn_blocking(|| {
+pub(crate) async fn diagnostics_snapshot(
+    state: tauri::State<'_, ManagerState>,
+) -> Result<DiagnosticsSnapshot, String> {
+    let launch_state_snapshot = state
+        .launch_state
+        .lock()
+        .map_err(|_| "启动状态锁已损坏")?
+        .clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
         let status_path = codex_pilot_core::status::status_path();
         let status_exists = status_path.exists();
         let prefs = load_launch_preferences();
-        let helper_port = launch_options_from_preferences(&prefs).helper_port;
-        let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(helper_port);
+        let options = launch_options_from_preferences(&prefs);
+        let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(options.helper_port);
+        let backend_kind = launch_action_kind(
+            true,
+            matches!(launch_state_snapshot, LaunchState::Running),
+            matches!(launch_state_snapshot, LaunchState::Running) || helper_reachable,
+            &options,
+            &launch_state_snapshot,
+        );
+        let backend_check = match backend_kind.as_str() {
+            "running" => DiagnosticCheck {
+                name: "后端状态".to_string(),
+                status: "ok".to_string(),
+                detail: format!(
+                    "本地连接服务已连接；状态文件路径：{}",
+                    status_path.to_string_lossy()
+                ),
+            },
+            "launching" => DiagnosticCheck {
+                name: "后端状态".to_string(),
+                status: "ok".to_string(),
+                detail: format!(
+                    "Codex 正在启动中，请稍候。状态文件路径：{}",
+                    status_path.to_string_lossy()
+                ),
+            },
+            "reinject" => DiagnosticCheck {
+                name: "后端状态".to_string(),
+                status: "warning".to_string(),
+                detail: format!(
+                    "调试端口可达但本地连接服务未响应，可回到启动页点'重新注入'。状态文件路径：{}",
+                    status_path.to_string_lossy()
+                ),
+            },
+            "restart" => DiagnosticCheck {
+                name: "后端状态".to_string(),
+                status: "warning".to_string(),
+                detail: "检测到 Codex 在运行但非 CodexPilot 启动，需要在启动页点'重启并注入'。"
+                    .to_string(),
+            },
+            "unavailable" => DiagnosticCheck {
+                name: "后端状态".to_string(),
+                status: "missing".to_string(),
+                detail: "未检测到本地连接服务，且 Codex 应用路径未配置。".to_string(),
+            },
+            "launch" | _ => DiagnosticCheck {
+                name: "后端状态".to_string(),
+                status: if status_exists {
+                    "warning".to_string()
+                } else {
+                    "missing".to_string()
+                },
+                detail: if status_exists {
+                    format!(
+                        "本地连接服务无响应，但发现旧状态文件：{}。后端可能已退出或端口配置不一致，请回到启动页点'重新注入'。",
+                        status_path.to_string_lossy()
+                    )
+                } else {
+                    format!(
+                        "未检测到本地连接服务，且状态文件不存在：{}",
+                        status_path.to_string_lossy()
+                    )
+                },
+            },
+        };
         let provider_sync_check = provider_sync_diagnostic_check();
         DiagnosticsSnapshot {
             checks: vec![
-                DiagnosticCheck {
-                    name: "后端状态".to_string(),
-                    status: if helper_reachable {
-                        "ok"
-                    } else if status_exists {
-                        "warning"
-                    } else {
-                        "missing"
-                    }
-                    .to_string(),
-                    detail: if helper_reachable {
-                        format!(
-                            "本地连接服务已连接；状态文件路径：{}",
-                            status_path.to_string_lossy()
-                        )
-                    } else if status_exists {
-                        format!(
-                            "本地连接服务无响应，但发现旧状态文件：{}。后端可能已退出或端口配置不一致，请回到启动页点'重新注入'。",
-                            status_path.to_string_lossy()
-                        )
-                    } else {
-                        format!(
-                            "未检测到本地连接服务，且状态文件不存在：{}",
-                            status_path.to_string_lossy()
-                        )
-                    },
-                },
+                backend_check,
                 DiagnosticCheck {
                     name: "Codex 应用探测".to_string(),
                     status: if codex_pilot_core::app_paths::resolve_codex_app_dir(None).is_some() {
