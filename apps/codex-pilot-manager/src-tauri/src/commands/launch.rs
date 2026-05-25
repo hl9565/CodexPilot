@@ -4,7 +4,7 @@ pub(crate) use crate::commands::launch_helpers::launch_state_label;
 use crate::commands::launch_helpers::{
     auto_sync_sessions_after_launch, cached_codex_process_running,
     clear_backend_status_file, launch_action_detail, launch_action_kind, launch_action_label,
-    request_codex_quit,
+    request_codex_quit, with_codex_process_cache_mut, with_launch_state_mut,
 };
 
 fn emit_launch_state(app: &tauri::AppHandle, new_state: &LaunchState) {
@@ -199,9 +199,9 @@ async fn inject_existing_codex(
         }
         Err(error) => {
             let message = format!("重新注入失败：{error}");
-            if let Ok(mut current) = state.launch_state.lock() {
+            with_launch_state_mut(state, |current| {
                 *current = LaunchState::Failed(message.clone());
-            }
+            });
             emit_launch_state(app, &LaunchState::Failed(message.clone()));
             Err(message)
         }
@@ -293,9 +293,9 @@ async fn spawn_launcher(
     let launcher = match resolve_launcher_path() {
         Ok(path) => path,
         Err(message) => {
-            if let Ok(mut current) = state.launch_state.lock() {
+            with_launch_state_mut(state, |current| {
                 *current = LaunchState::Failed(message.clone());
-            }
+            });
             emit_launch_state(app, &LaunchState::Failed(message.clone()));
             return Err(message);
         }
@@ -305,9 +305,9 @@ async fn spawn_launcher(
     command.stdout(Stdio::null()).stderr(Stdio::null());
     if let Err(error) = command.spawn() {
         let message = format!("启动 CodexPilot 失败：{error}");
-        if let Ok(mut current) = state.launch_state.lock() {
+        with_launch_state_mut(state, |current| {
             *current = LaunchState::Failed(message.clone());
-        }
+        });
         emit_launch_state(app, &LaunchState::Failed(message.clone()));
         return Err(message);
     }
@@ -324,9 +324,9 @@ async fn spawn_launcher(
             Ok(auto_sync_sessions_after_launch("launch", prefs).await)
         }
         Err(message) => {
-            if let Ok(mut current) = state.launch_state.lock() {
+            with_launch_state_mut(state, |current| {
                 *current = LaunchState::Failed(message.clone());
-            }
+            });
             emit_launch_state(app, &LaunchState::Failed(message.clone()));
             Err(message)
         }
@@ -372,8 +372,8 @@ async fn wait_for_backend_launch(helper_port: u16) -> Result<(), String> {
 }
 
 pub(crate) fn set_cached_codex_process_running(state: &ManagerState, codex_running: bool) {
-    if let Ok(mut cache) = state.codex_process_cache.lock() {
+    with_codex_process_cache_mut(state, |cache| {
         cache.codex_running = codex_running;
         cache.checked_at = Some(Instant::now());
-    }
+    });
 }

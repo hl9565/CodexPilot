@@ -2,6 +2,36 @@ use super::super::*;
 use crate::commands::diagnostics::append_diagnostic_event;
 use crate::commands::launch::set_cached_codex_process_running;
 
+pub(crate) fn with_launch_state_mut<F>(state: &ManagerState, f: F)
+where
+    F: FnOnce(&mut LaunchState),
+{
+    match state.launch_state.lock() {
+        Ok(mut g) => f(&mut g),
+        Err(poisoned) => {
+            tracing::error!(target = "mutex", lock = "launch_state", "mutex poisoned, recovering");
+            let mut g = poisoned.into_inner();
+            f(&mut g);
+            state.launch_state.clear_poison();
+        }
+    }
+}
+
+pub(crate) fn with_codex_process_cache_mut<F>(state: &ManagerState, f: F)
+where
+    F: FnOnce(&mut CodexProcessCache),
+{
+    match state.codex_process_cache.lock() {
+        Ok(mut g) => f(&mut g),
+        Err(poisoned) => {
+            tracing::error!(target = "mutex", lock = "codex_process_cache", "mutex poisoned, recovering");
+            let mut g = poisoned.into_inner();
+            f(&mut g);
+            state.codex_process_cache.clear_poison();
+        }
+    }
+}
+
 pub(crate) fn clear_backend_status_file() {
     let path = codex_pilot_core::status::status_path();
     if path.exists() {
