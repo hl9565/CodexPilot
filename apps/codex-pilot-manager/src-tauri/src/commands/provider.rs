@@ -1,5 +1,6 @@
 use super::super::*;
 use codex_pilot_core::error::ManagerError;
+use std::path::{Path, PathBuf};
 
 fn provider_sync_message(sync: codex_pilot_data::provider_sync::ProviderSyncResult) -> String {
     format!(
@@ -29,6 +30,63 @@ fn sanitize_provider_sync_target(value: String) -> Result<String, ManagerError> 
         ));
     }
     Ok(trimmed.to_string())
+}
+
+struct RecoverySnapshot {
+    dir: PathBuf,
+}
+
+impl RecoverySnapshot {
+    fn dir_string(&self) -> String {
+        self.dir.display().to_string()
+    }
+}
+
+fn capture_recovery_snapshot(operation: &str) -> Result<RecoverySnapshot, ManagerError> {
+    let base = codex_pilot_core::app_paths::app_state_dir().join("recovery-snapshots");
+    let files: Vec<(&str, PathBuf)> = vec![
+        ("provider-profiles.json", provider_profiles_path()),
+        ("config.toml", codex_pilot_core::app_paths::codex_config_path()),
+        ("auth.json", codex_pilot_core::app_paths::codex_auth_path()),
+    ];
+    capture_recovery_snapshot_to(&base, operation, &files)
+        .map(|dir| RecoverySnapshot { dir })
+        .map_err(|e| ManagerError::Io(format!("生成恢复点失败：{e}")))
+}
+
+fn capture_recovery_snapshot_to(
+    base_dir: &Path,
+    operation: &str,
+    files: &[(&str, PathBuf)],
+) -> std::io::Result<PathBuf> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let dir = base_dir.join(format!("{ts}-{operation}"));
+    std::fs::create_dir_all(&dir)?;
+    let mut entries = Vec::with_capacity(files.len());
+    for (name, original) in files {
+        let present = original.exists();
+        if present {
+            std::fs::copy(original, dir.join(name))?;
+        }
+        entries.push(serde_json::json!({
+            "name": name,
+            "original_path": original.display().to_string(),
+            "present": present,
+        }));
+    }
+    let manifest = serde_json::json!({
+        "operation": operation,
+        "captured_at_ms": ts,
+        "files": entries,
+    });
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    Ok(dir)
 }
 
 #[tauri::command]
@@ -265,14 +323,20 @@ pub(crate) async fn save_provider_profile(
     request: ProviderProfileSaveRequest,
 ) -> Result<ProviderProfileSaveResponse, ManagerError> {
     tauri::async_runtime::spawn_blocking(move || {
+        let recovery = capture_recovery_snapshot("save_provider_profile")?;
+        let wrap = |err: ManagerError| ManagerError::WithRecoveryPoint {
+            message: err.to_string(),
+            recovery_dir: recovery.dir_string(),
+        };
         let mut state = load_provider_profiles();
         let activate = request.activate;
-        let profile = sanitize_provider_profile(request).map_err(ManagerError::InvalidInput)?;
+        let profile =
+            sanitize_provider_profile(request).map_err(|e| wrap(ManagerError::InvalidInput(e)))?;
         let normalized_name = profile.name.trim();
         if state.profiles.iter().any(|item| {
             item.id != profile.id && item.name.trim().eq_ignore_ascii_case(normalized_name)
         }) {
-            return Err(ManagerError::Conflict("配置档名称不能重复。".to_string()));
+            return Err(wrap(ManagerError::Conflict("配置档名称不能重复。".to_string())));
         }
         let id = profile.id.clone();
         if let Some(existing) = state.profiles.iter_mut().find(|item| item.id == id) {
@@ -287,11 +351,12 @@ pub(crate) async fn save_provider_profile(
         {
             state.active_profile_id = id.clone();
         }
-        capture_official_snapshot_if_missing(&mut state).map_err(ManagerError::Internal)?;
+        capture_official_snapshot_if_missing(&mut state)
+            .map_err(|e| wrap(ManagerError::Internal(e)))?;
         save_provider_profiles_to_path(&provider_profiles_path(), &state)
-            .map_err(ManagerError::Io)?;
+            .map_err(|e| wrap(ManagerError::Io(e)))?;
         let message = if state.active_profile_id == id {
-            apply_active_profile(&state).map_err(ManagerError::Internal)?
+            apply_active_profile(&state).map_err(|e| wrap(ManagerError::Internal(e)))?
         } else {
             "中转配置档已保存。".to_string()
         };
@@ -306,15 +371,23 @@ pub(crate) async fn activate_provider_profile(
     request: ProviderProfileIdRequest,
 ) -> Result<String, ManagerError> {
     tauri::async_runtime::spawn_blocking(move || {
+        let recovery = capture_recovery_snapshot("activate_provider_profile")?;
+        let wrap = |err: ManagerError| ManagerError::WithRecoveryPoint {
+            message: err.to_string(),
+            recovery_dir: recovery.dir_string(),
+        };
         let mut state = load_provider_profiles();
         if !state.profiles.iter().any(|profile| profile.id == request.id) {
-            return Err(ManagerError::NotFound("中转配置档不存在。".to_string()));
+            return Err(wrap(ManagerError::NotFound(
+                "中转配置档不存在。".to_string(),
+            )));
         }
         state.active_profile_id = request.id;
-        capture_official_snapshot_if_missing(&mut state).map_err(ManagerError::Internal)?;
+        capture_official_snapshot_if_missing(&mut state)
+            .map_err(|e| wrap(ManagerError::Internal(e)))?;
         save_provider_profiles_to_path(&provider_profiles_path(), &state)
-            .map_err(ManagerError::Io)?;
-        apply_active_profile(&state).map_err(ManagerError::Internal)
+            .map_err(|e| wrap(ManagerError::Io(e)))?;
+        apply_active_profile(&state).map_err(|e| wrap(ManagerError::Internal(e)))
     })
     .await
     .map_err(|error| ManagerError::Internal(format!("启用中转配置档任务失败：{error}")))?
@@ -433,4 +506,37 @@ pub(crate) async fn sync_provider_sessions(
     })
     .await
     .map_err(|error| ManagerError::Internal(format!("同步历史会话任务失败：{error}")))?
+}
+
+#[cfg(test)]
+mod recovery_snapshot_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn captures_and_writes_manifest() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("rs");
+        let src = tmp.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        let a = src.join("a.json");
+        fs::write(&a, b"AAA").unwrap();
+        let b = src.join("b.toml");
+        fs::write(&b, b"BBB").unwrap();
+        let m = src.join("m.json");
+        let files = vec![("a.json", a), ("b.toml", b), ("m.json", m)];
+        let dir = capture_recovery_snapshot_to(&base, "op", &files).unwrap();
+        assert!(dir.starts_with(&base));
+        assert_eq!(fs::read(dir.join("a.json")).unwrap(), b"AAA");
+        assert_eq!(fs::read(dir.join("b.toml")).unwrap(), b"BBB");
+        assert!(!dir.join("m.json").exists());
+        let mf: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(mf["operation"], "op");
+        let arr = mf["files"].as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["present"], true);
+        assert_eq!(arr[2]["present"], false);
+    }
 }
