@@ -25,7 +25,7 @@
 | T10   | `provider.rs` 事务性调研          | P2     | 1 h    | DONE |
 | T11   | 修复 `lib.rs` 测试 `default_upstream_protocol` import 遗漏 | P0 | 5 min | DONE |
 | T12   | 补齐 `protocol_proxy_transport.rs` 漏掉的 3 处 `reqwest::Client::new()` | P1 | 10 min | DONE |
-| T13   | 修复 `diagnostic_log` 并行测试 flaky | P2 | 30 min | TODO |
+| T13   | 修复 `diagnostic_log` 并行测试 flaky | P2 | 30 min | DONE |
 | T14   | 后端连接状态口径统一 + UI 文案修复 + ProgressDialog 改非阻塞 chip | P1 | 45 min | DONE |
 | T14b  | 修复 Tauri 中 `window.confirm` 失效导致的前端阻塞 | P1 | 20 min | DONE |
 | T14c  | 修复诊断页“后端状态”与启动页/总览页连接判定不一致 | P1 | 15 min | DONE |
