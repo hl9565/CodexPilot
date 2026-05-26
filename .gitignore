@@ -11,6 +11,7 @@ docs/development/*
 !docs/development/readme-guidelines.md
 !docs/development/refactor-backlog.md
 !docs/development/*-analysis.md
+!docs/development/*-mapping.md
 docs/previews/
 docs/superpowers/
 !docs/superpowers/

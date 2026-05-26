@@ -36,7 +36,7 @@
 | T17   | sort_key 在 sqlite 缺行时从 rollout 文件名兜底 | P2 | 30 min | DONE |
 | T18   | `thread_sort_keys` 200 静默截断改显式 | P2 | 30 min | DONE |
 | T19   | `session_zip` 导出目录按相对路径稳定排序 | P2 | 20 min | DONE |
-| T20a  | `storage.rs` 拆分映射表调研（51 个内部 helper 归属） | P2 | 1 h | TODO |
+| T20a  | `storage.rs` 拆分映射表调研（51 个内部 helper 归属） | P2 | 1 h | DONE |
 | T20b  | `storage.rs` 按 T20a 映射表机械搬运 | P2 | 2-3 h | TODO（依赖 T20a） |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
