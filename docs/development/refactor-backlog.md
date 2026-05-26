@@ -1066,25 +1066,51 @@ for entry in fs::read_dir(source)? {
 
 **前置依赖**：T20a 必须 DONE，且 [storage-split-mapping.md](docs/development/storage-split-mapping.md) 已被维护者审过。
 
+**前置依赖**：T20a 已 DONE，报告 [docs/development/storage-split-mapping.md](docs/development/storage-split-mapping.md) 已被维护者审查通过（2026-05-26）。本 prompt 在报告基础上补 3 条 T20a 没说透的细节：第 1 步建空骨架文件、`impl ToSql for OwnedSqlValue` 必须跟着类型搬、D 组测试在第 8 步随代码同步搬。
+
 **Codex Prompt**：
 
 ```
-（等 T20a 调研报告出来后，根据报告内容生成本 prompt。先不要写。）
+按 docs/development/storage-split-mapping.md（已经在仓库里）的第 7 节执行计划，把 crates/codex-pilot-data/src/storage.rs 拆成多个子模块。
 
-写 prompt 时严格遵守的原则：
-1. 完全照搬 T20a 报告里的执行步骤，每一步独立 commit
-2. 每一步搬运后跑 cargo test --workspace，必须全绿才能下一步
-3. 禁止改动任何函数体逻辑——只是把 `fn xxx() { ... }` 整段搬到新文件
-4. 禁止改 impl 块的内部逻辑——只是把 `impl SQLiteStorageAdapter { ... }` 按方法分组拆成多个 impl 块（每个子模块一个）
-5. 禁止改公开 API 签名
-6. 禁止调整测试断言
-7. storage/mod.rs 必须 pub use 所有原来 pub 的符号，让 codex_pilot_data::storage::* 这层外部路径完全不变
-8. 可见性升级严格按 T20a 的清单，不要私自升级别的 fn
-9. 整个 T20b 完成后跑：
-   - cargo fmt --check
-   - cargo clippy --workspace -- -D warnings（如果项目用 clippy）
-   - cargo test --workspace
-   - cd apps/codex-pilot-manager && npm test（确认前端没受影响）
+前置阅读（必读，全文）：docs/development/storage-split-mapping.md
+特别精读：第 1 节目标结构、第 5 节可见性升级清单、第 7 节 10 步执行计划、第 8 节最小规则。
+
+严格规则（在报告第 8 节之上补充三条 T20a 没说透的细节）：
+
+1. 第 1 步建子模块骨架时，对每个新建的 .rs 文件先写空文件（只允许一行 `// placeholder, content arrives in later steps`），让 cargo check 过。第 1 步不搬任何代码。
+
+2. `impl ToSql for OwnedSqlValue` 这个 trait impl 必须跟着 OwnedSqlValue 一起搬到 sql_helpers.rs（同文件 = 满足孤儿规则）。不要留在 mod.rs。
+
+3. 第 8 步搬 D 组代码时，把 D 组全部 6 个测试（finds_archived_thread_moves_workspace_and_reads_sort_keys、sort_keys_truncates_at_max_batch_with_explicit_marker、parse_rollout_filename_extracts_id_and_timestamp、parse_rollout_filename_rejects_garbage、rollout_fallback_finds_existing_file、rollout_fallback_returns_none_for_missing_id）**同步**搬到 codex_threads.rs 的 #[cfg(test)] mod tests。**不要等到第 9 步**。第 9 步只清理 mod.rs 的运行时残留代码。
+
+执行硬性约束：
+
+- 每一步独立 commit，message 用 "T20b 第 N 步：<报告里该步的标题>" 格式。
+- 严格机械搬运：不改函数体、不改测试断言、不改公开 API 名称、不调整 impl 内方法顺序、不"顺手"修 import 风格、不重命名变量。
+- 可见性严格按报告第 5.1 / 5.2 / 5.3 节升级，不私自把别的 fn 升 pub(super) 或 pub(crate)。第 5.4 节"不应该升级"清单的 29 项必须保持模块私有。
+- 每一步搬完跑 `cargo fmt` + `cargo test --workspace`，必须全绿才能进入下一步。
+
+全部 10 步做完后最终跑：
+
+- `cargo fmt --check`
+- `cargo test --workspace`
+- `cd apps/codex-pilot-manager && npm test`
+- `rg -n "pub\(crate\) fn|pub\(crate\) enum|pub\(crate\) const" crates/codex-pilot-data/src/storage`（核对没有遗漏过宽可见性，参照报告第 7 节第 10 步）
+- 确认 codex_pilot_data::storage::SQLiteStorageAdapter / SessionRef / DeleteStatus / DeleteResult / RecycleBinEntry 外部路径完全不变。
+
+完成后把 docs/development/refactor-backlog.md 状态总览表 T20b 行 TODO 改 DONE。
+
+绝对禁止：
+
+- 不要修改 lib.rs
+- 不要修改 storage.rs 之外的任何运行时代码（包括 codex-pilot-core）
+- 不要在搬代码的同时改算法或错误信息文案
+- 不要重命名任何 fn / struct / field
+- 不要把 trait impl 跟它实现的类型拆到不同文件（违反孤儿规则）
+- 任何步骤的 cargo test 失败：停下来诊断；不要 --no-verify 或绕过测试；不要合并多步
+
+如果实施期发现报告与代码实际有不一致（例如某 helper 还有报告没列的 caller），先在 docs/development/storage-split-mapping.md 末尾追加 "## 8.1 实施期发现" 章节记录，再决定是否调整该步骤。不要静默调整。
 ```
 
 **验收**：
