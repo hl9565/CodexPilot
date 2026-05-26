@@ -489,3 +489,13 @@ backup.rs      <- recycle_bin.rs / delete_undo.rs
 - 不额外升别的 `pub(super)`；只升第 5 节列出的项
 - 不把跨组集成测试强拆到单模块
 - 每一步独立 commit，每一步跑 `cargo test --workspace`
+
+## 8.1 实施期发现
+
+- 第 2 步实施时发现：[`crates/codex-pilot-data/src/markdown.rs`](/Users/huanglin/code/github/CodexPilot/crates/codex-pilot-data/src/markdown.rs) 仍通过 `crate::storage::normalize_session_id` 调用该 helper。
+- 这与第 2 节“`normalize_session_id` 只被 `SessionRef::normalized_id` 调用，可收窄为 `models.rs` 私有”的结论不一致。
+- 实施调整：
+  - `normalize_session_id` 仍随 `SessionRef` 一起搬到 `models.rs`；
+  - 但 `models.rs` 内把它保持为 `pub(crate)`；
+  - `storage/mod.rs` 增加 `pub(crate) use models::normalize_session_id;`，以保持当前 crate 内调用点不改路径。
+- 这不影响对外公开 API；它仍不是 `pub`，只是在 `codex-pilot-data` crate 内保留现状可见性。
