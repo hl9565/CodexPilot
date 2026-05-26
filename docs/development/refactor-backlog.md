@@ -32,6 +32,10 @@
 | T15   | 修 .gitignore 把 docs/development 重要文档加白名单 | P2 | 5 min | DONE |
 | T10b  | provider 命令显式恢复点 snapshot | P2     | 2-4 h  | DONE |
 | T13b  | 修 routes.rs diagnostic_log 测试 flaky | P2 | 15 min | DONE |
+| T16   | session_zip merge 会话不显示 + 导出顺序调研 | P2 | 1 h | DONE |
+| T17   | sort_key 在 sqlite 缺行时从 rollout 文件名兜底 | P2 | 30 min | DONE |
+| T18   | `thread_sort_keys` 200 静默截断改显式 | P2 | 30 min | DONE |
+| T19   | `session_zip` 导出目录按相对路径稳定排序 | P2 | 20 min | TODO |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
@@ -805,3 +809,162 @@ appSupport.tsx 修改 ProgressDialog 组件（约 line 21-33）：
 - 当真正未启动：右上按钮"启动 Codex"+Play+enabled
 - 触发导出 ZIP / 同步对话等长任务：右下角出现一个 chip 显示进度，**同时其他按钮（永久删除、刷新等）仍可点击**
 - chip 不遮挡 toast（toast 在底部 22px、chip 在底部 70px 不重叠）
+
+---
+
+### T18 · `thread_sort_keys` 200 静默截断改显式
+
+**问题**：`crates/codex-pilot-data/src/storage.rs:444` 在 `codex_thread_sort_keys` 里用 `acc.len() < 200` 静默截断请求 id 列表，第 201 个及之后的 id 不会进入查询、也不在返回数组里出现。这是 T16 调研报告 §4 已经识别但未修的尾巴：调用方拿到一个"缺项数组"却没有任何 truncated 标记。
+
+完整代码位置（T17 之后行号）：
+
+```rust
+// storage.rs:439-448
+let thread_ids = sessions
+    .iter()
+    .map(SessionRef::normalized_id)
+    .filter(|id| !id.is_empty())
+    .fold(Vec::<String>::new(), |mut acc, id| {
+        if !acc.contains(&id) && acc.len() < 200 {
+            acc.push(id);
+        }
+        acc
+    });
+```
+
+**Codex Prompt**：
+
+```
+修复 crates/codex-pilot-data/src/storage.rs 里 codex_thread_sort_keys 的 200 静默截断。本任务只动这一个文件。
+
+具体改动：
+
+1. 在 codex_thread_sort_keys 函数定义之前（约 storage.rs:430 上方），新增一个 pub(crate) 常量：
+
+       /// 单次 thread_sort_keys 请求允许查询的去重 id 上限。
+       /// 超过这个数量的 id 会被截断，调用方需要分批请求。
+       pub(crate) const MAX_SORT_KEY_BATCH: usize = 200;
+
+2. 把 fold 里的 acc.len() < 200 改成 acc.len() < MAX_SORT_KEY_BATCH。
+
+3. 在 fold 之后立刻新增一个变量记录"原始去重 id 总数"和"截断后保留 id 数"：
+
+   - 先把整个去重过程拆成两步：
+       let unique_ids: Vec<String> = sessions
+           .iter()
+           .map(SessionRef::normalized_id)
+           .filter(|id| !id.is_empty())
+           .fold(Vec::<String>::new(), |mut acc, id| {
+               if !acc.contains(&id) {
+                   acc.push(id);
+               }
+               acc
+           });
+       let requested = unique_ids.len();
+       let truncated = requested > MAX_SORT_KEY_BATCH;
+       let thread_ids: Vec<String> = unique_ids.into_iter().take(MAX_SORT_KEY_BATCH).collect();
+
+4. 在最终 Ok(json!(...)) 返回处（约 storage.rs:480）把返回体扩展为：
+
+       Ok(json!({
+           "status": "ok",
+           "sort_keys": sort_keys,
+           "requested": requested,
+           "returned": sort_keys.len(),
+           "truncated": truncated,
+           "max_batch": MAX_SORT_KEY_BATCH,
+       }))
+
+5. 同步更新 thread_ids.is_empty() 早返回分支（约 storage.rs:449-451），让它也带上 requested/returned/truncated/max_batch 四个字段（requested=0, returned=0, truncated=false）。
+
+6. 同步更新 db_path 不存在和 schema 不匹配两个 failed 分支，统一带上 requested/returned/truncated/max_batch（值取 0/0/false/MAX_SORT_KEY_BATCH 即可），保持 schema 一致。
+
+7. 测试更新（在同文件 mod tests）：
+   - 现有 finds_archived_thread_moves_workspace_and_reads_sort_keys 里 assert_eq! 的 json! 字面量需要补 requested=2, returned=2, truncated=false, max_batch=200。
+   - 新增一个测试 sort_keys_truncates_at_max_batch：构造一个 sessions 数组长度为 MAX_SORT_KEY_BATCH + 5（用 SessionRef::new("tN", None) 这种合成 id，不需要真插数据库；只需要确保 db 文件存在且 schema 是 CodexThreads。可以借用现有 setup 代码新建一个空 threads 表的 db）。断言返回体里 truncated=true，requested=MAX_SORT_KEY_BATCH + 5，returned <= MAX_SORT_KEY_BATCH（实际可能是 0，因为没插数据），max_batch=MAX_SORT_KEY_BATCH。
+
+要求：
+- 只改 storage.rs 这一个文件
+- 不要动 routes_sessions.rs / bridge_scripts.rs / renderer-inject.js
+- 不要"顺手"重构 codex_thread_sort_key（单条版本）
+- 改完跑 cargo test --workspace 必须全绿
+- 把 backlog T18 行 TODO 改 DONE
+```
+
+**验收**：
+- `cargo test --workspace` 全绿
+- 大于 200 个 id 时返回体里 `truncated: true` + `requested/returned/max_batch` 字段齐全
+- 后续可基于 truncated 决定是否分批；本任务不做分批，留给将来
+
+---
+
+### T19 · `session_zip` 导出目录按相对路径稳定排序
+
+**问题**：`crates/codex-pilot-data/src/session_zip.rs:344` 和 `:460` 都用 `fs::read_dir` 直接遍历，标准库不保证顺序。T16 报告 §5 指出同一份数据多次导出的 ZIP 内文件顺序会变，影响人工 diff、审计和可重复构建。
+
+具体位置：
+
+```rust
+// session_zip.rs:344 add_directory_recursive
+for entry in fs::read_dir(current)? {
+    let path = entry?.path();
+    ...
+}
+
+// session_zip.rs:460 copy_directory_contents
+for entry in fs::read_dir(source)? {
+    let path = entry?.path();
+    ...
+}
+```
+
+**Codex Prompt**：
+
+```
+修复 crates/codex-pilot-data/src/session_zip.rs 中导出 ZIP / 复制目录时遍历顺序不稳定的问题。本任务只动这一个文件。
+
+具体改动：
+
+1. add_directory_recursive（约 session_zip.rs:336-363）：
+   把
+       for entry in fs::read_dir(current)? {
+           let path = entry?.path();
+           ...
+       }
+   改成先 collect 再排序：
+       let mut entries: Vec<std::path::PathBuf> = fs::read_dir(current)?
+           .filter_map(|entry| entry.ok().map(|e| e.path()))
+           .collect();
+       entries.sort();
+       for path in entries {
+           let relative = path
+               .strip_prefix(root)
+               .with_context(|| format!("strip prefix {}", path.display()))?;
+           ...
+       }
+   保留原有 if path.is_dir() / is_file() 分支不变。
+
+2. copy_directory_contents（约 session_zip.rs:458-477）：同样模式改成 collect+sort 之后再遍历。
+   注意 copy_directory_contents 的递归调用本身要保持，只在每一层把 read_dir 输出排序。
+
+3. 不要"顺手"改 count_files_if_present（约 session_zip.rs:491-505）—— 它纯计数，顺序无影响。
+
+4. 测试：在同文件 mod tests 内（如果没有就在文件末尾新建 #[cfg(test)] mod tests），加一个测试 zip_entries_are_sorted_by_relative_path：
+   - 在临时目录里创建几个文件，名字故意打乱：c.jsonl, a.jsonl, b.jsonl, sub/zzz.jsonl, sub/aaa.jsonl
+   - 调用 export_current_state_to_path 导出 ZIP
+   - 用 zip::ZipArchive 打开导出文件，把所有 entry name collect 出来
+   - 断言这些 entry 在数组里是按字典序的（可以只断言 sessions 子目录下的几个文件的相对顺序）
+
+要求：
+- 只改 session_zip.rs
+- 不要改 export_zip / import_zip 公共签名
+- 不要改 manifest 内容
+- 改完跑 cargo test -p codex-pilot-data 必须全绿
+- 改完跑 cargo test --workspace 也必须全绿
+- 把 backlog T19 行 TODO 改 DONE
+```
+
+**验收**：
+- `cargo test -p codex-pilot-data` 全绿
+- 多次导出同一份数据，ZIP 内 entry 顺序一致（手动 unzip 看也可）
+- 顺序只是字典序，不承诺"与 UI 一致"——后者是更大的工作，T16 §5.5 已说明

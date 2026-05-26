@@ -96,6 +96,10 @@ struct BackupPayload {
     tables: Map<String, Value>,
 }
 
+/// 单次 `thread_sort_keys` 请求允许查询的去重 id 上限。
+/// 超过这个数量的 id 会被截断，调用方需要分批请求；返回体里 `truncated` 字段会显式标记。
+pub(crate) const MAX_SORT_KEY_BATCH: usize = 200;
+
 impl SQLiteStorageAdapter {
     pub fn new(db_path: PathBuf) -> Self {
         let backup_dir = db_path
@@ -429,25 +433,40 @@ impl SQLiteStorageAdapter {
     }
 
     pub fn codex_thread_sort_keys(&self, sessions: &[SessionRef]) -> anyhow::Result<Value> {
-        if !self.db_path.exists() {
-            return Ok(json!({
-                "status": "failed",
-                "message": format!("database not found: {}", self.db_path.display()),
-                "sort_keys": []
-            }));
-        }
-        let thread_ids = sessions
+        let unique_ids: Vec<String> = sessions
             .iter()
             .map(SessionRef::normalized_id)
             .filter(|id| !id.is_empty())
             .fold(Vec::<String>::new(), |mut acc, id| {
-                if !acc.contains(&id) && acc.len() < 200 {
+                if !acc.contains(&id) {
                     acc.push(id);
                 }
                 acc
             });
+        let requested = unique_ids.len();
+        let truncated = requested > MAX_SORT_KEY_BATCH;
+        let thread_ids: Vec<String> = unique_ids.into_iter().take(MAX_SORT_KEY_BATCH).collect();
+
+        if !self.db_path.exists() {
+            return Ok(json!({
+                "status": "failed",
+                "message": format!("database not found: {}", self.db_path.display()),
+                "sort_keys": [],
+                "requested": requested,
+                "returned": 0,
+                "truncated": truncated,
+                "max_batch": MAX_SORT_KEY_BATCH,
+            }));
+        }
         if thread_ids.is_empty() {
-            return Ok(json!({"status": "ok", "sort_keys": []}));
+            return Ok(json!({
+                "status": "ok",
+                "sort_keys": [],
+                "requested": requested,
+                "returned": 0,
+                "truncated": truncated,
+                "max_batch": MAX_SORT_KEY_BATCH,
+            }));
         }
 
         let db = Connection::open(&self.db_path)?;
@@ -455,7 +474,11 @@ impl SQLiteStorageAdapter {
             return Ok(json!({
                 "status": "failed",
                 "message": "unsupported local storage schema",
-                "sort_keys": []
+                "sort_keys": [],
+                "requested": requested,
+                "returned": 0,
+                "truncated": truncated,
+                "max_batch": MAX_SORT_KEY_BATCH,
             }));
         }
         let sessions_dir = sessions_dir_for(&self.db_path);
@@ -477,7 +500,15 @@ impl SQLiteStorageAdapter {
                 sort_keys.push(Value::Object(payload));
             }
         }
-        Ok(json!({"status": "ok", "sort_keys": sort_keys}))
+        let returned = sort_keys.len();
+        Ok(json!({
+            "status": "ok",
+            "sort_keys": sort_keys,
+            "requested": requested,
+            "returned": returned,
+            "truncated": truncated,
+            "max_batch": MAX_SORT_KEY_BATCH,
+        }))
     }
 
     fn delete_generic_session(
@@ -2041,12 +2072,62 @@ mod tests {
                 "sort_keys": [
                     {"session_id": "t2", "updated_at": 20, "updated_at_ms": 20000, "created_at_ms": 2, "source": "sqlite"},
                     {"session_id": "t1", "updated_at": 10, "updated_at_ms": 10000, "created_at_ms": 1, "source": "sqlite"}
-                ]
+                ],
+                "requested": 2,
+                "returned": 2,
+                "truncated": false,
+                "max_batch": MAX_SORT_KEY_BATCH,
             })
         );
 
         let _ = fs::remove_file(db_path);
         let _ = fs::remove_file(rollout_path);
+        let _ = fs::remove_dir_all(adapter.backup_dir());
+    }
+
+    #[test]
+    fn sort_keys_truncates_at_max_batch_with_explicit_marker() {
+        let db_path = unique_temp_path("sort-keys-truncate");
+        let backup_dir = db_path.with_extension("undo");
+        let db = Connection::open(&db_path).unwrap();
+        db.execute(
+            "CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                rollout_path TEXT,
+                updated_at_ms INTEGER,
+                created_at_ms INTEGER
+            )",
+            [],
+        )
+        .unwrap();
+        drop(db);
+
+        let adapter = SQLiteStorageAdapter::with_backup_dir(db_path.clone(), backup_dir);
+
+        let over_limit = MAX_SORT_KEY_BATCH + 5;
+        let sessions: Vec<SessionRef> = (0..over_limit)
+            .map(|i| SessionRef::new(&format!("t{i}"), None))
+            .collect();
+        let result = adapter.codex_thread_sort_keys(&sessions).unwrap();
+
+        assert_eq!(result["status"], "ok");
+        assert_eq!(result["requested"], over_limit);
+        assert_eq!(result["truncated"], true);
+        assert_eq!(result["max_batch"], MAX_SORT_KEY_BATCH);
+        let returned = result["returned"].as_u64().unwrap() as usize;
+        assert!(returned <= MAX_SORT_KEY_BATCH);
+        assert_eq!(returned, result["sort_keys"].as_array().unwrap().len());
+
+        let under_limit: Vec<SessionRef> = (0..3)
+            .map(|i| SessionRef::new(&format!("t{i}"), None))
+            .collect();
+        let small = adapter.codex_thread_sort_keys(&under_limit).unwrap();
+        assert_eq!(small["requested"], 3);
+        assert_eq!(small["truncated"], false);
+        assert_eq!(small["max_batch"], MAX_SORT_KEY_BATCH);
+
+        let _ = fs::remove_file(db_path);
         let _ = fs::remove_dir_all(adapter.backup_dir());
     }
 
