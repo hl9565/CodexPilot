@@ -499,3 +499,11 @@ backup.rs      <- recycle_bin.rs / delete_undo.rs
   - 但 `models.rs` 内把它保持为 `pub(crate)`；
   - `storage/mod.rs` 增加 `pub(crate) use models::normalize_session_id;`，以保持当前 crate 内调用点不改路径。
 - 这不影响对外公开 API；它仍不是 `pub`，只是在 `codex-pilot-data` crate 内保留现状可见性。
+- 第 3 步实施时发现：[`crates/codex-pilot-data/src/markdown.rs`](/Users/huanglin/code/github/CodexPilot/crates/codex-pilot-data/src/markdown.rs) 还直接使用 `crate::storage::SchemaKind`、`schema_kind`、`has_table`、`has_columns`。
+- 这与第 2/5 节把这几项统一收窄到 `pub(super)` 的结论不一致；报告 callers 漏记了 `markdown.rs` 这组 crate 内调用点。
+- 实施调整：
+  - `SchemaKind`、`schema_kind`、`has_table`、`has_columns` 仍搬到 `schema.rs`；
+  - `schema.rs` 内把这几项保持为 `pub(crate)`；
+  - `storage/mod.rs` 增加对应 `pub(crate) use schema::{...};`，保持当前 crate 内路径不变；
+  - `table_columns` 仍按原计划只在 `storage` 子模块体系内共享，保持 `pub(super)`。
+- 这同样不影响对外公开 API，只是保留 `codex-pilot-data` crate 内现有调用路径。
