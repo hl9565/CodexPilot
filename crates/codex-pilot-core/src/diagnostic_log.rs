@@ -10,6 +10,15 @@ const ROTATED_LOGS: usize = 5;
 #[cfg(test)]
 static TEST_LOG_PATH: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
+#[cfg(test)]
+pub(crate) fn test_log_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    match LOCK.get_or_init(|| std::sync::Mutex::new(())).lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 pub fn log_path() -> PathBuf {
     #[cfg(test)]
     if let Some(path) = TEST_LOG_PATH.lock().ok().and_then(|guard| guard.clone()) {
@@ -22,6 +31,13 @@ pub fn log_path() -> PathBuf {
 pub fn set_test_log_path(path: PathBuf) {
     if let Ok(mut guard) = TEST_LOG_PATH.lock() {
         *guard = Some(path);
+    }
+}
+
+#[cfg(test)]
+pub fn clear_test_log_path() {
+    if let Ok(mut guard) = TEST_LOG_PATH.lock() {
+        *guard = None;
     }
 }
 
@@ -157,12 +173,6 @@ fn redact(value: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn test_log_guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
-    }
 
     #[test]
     fn redact_hides_secret_like_keys() {
@@ -174,7 +184,7 @@ mod tests {
 
     #[test]
     fn append_rotates_large_log_file() {
-        let _guard = test_log_guard();
+        let _guard = super::test_log_guard();
         let root = std::env::temp_dir().join(format!(
             "codex-pilot-diagnostic-log-{}",
             SystemTime::now()
@@ -195,12 +205,12 @@ mod tests {
         let current = fs::read_to_string(&path).unwrap();
         assert!(current.contains("test.rotate"));
         let _ = fs::remove_dir_all(root);
-        set_test_log_path(PathBuf::from("diagnostic.log"));
+        clear_test_log_path();
     }
 
     #[test]
     fn read_tail_spans_rotated_logs() {
-        let _guard = test_log_guard();
+        let _guard = super::test_log_guard();
         let root = std::env::temp_dir().join(format!(
             "codex-pilot-diagnostic-tail-{}",
             SystemTime::now()
@@ -217,6 +227,6 @@ mod tests {
         assert_eq!(read_tail(3).unwrap(), vec!["old-2", "new-1", "new-2"]);
 
         let _ = fs::remove_dir_all(root);
-        set_test_log_path(PathBuf::from("diagnostic.log"));
+        clear_test_log_path();
     }
 }

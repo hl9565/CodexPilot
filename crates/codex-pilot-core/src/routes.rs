@@ -211,6 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn backend_status_reports_bridge_transport() {
+        let _guard = crate::diagnostic_log::test_log_guard();
         let result = handle_bridge_request(
             BridgeContext {
                 debug_port: 9688,
@@ -230,6 +231,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_path_uses_failed_shape() {
+        let _guard = crate::diagnostic_log::test_log_guard();
         let result = handle_bridge_request(
             BridgeContext {
                 debug_port: 9688,
@@ -247,6 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn recover_bridge_schedules_reinjection() {
+        let _guard = crate::diagnostic_log::test_log_guard();
         let result = handle_bridge_request(
             BridgeContext {
                 debug_port: 9,
@@ -264,6 +267,7 @@ mod tests {
 
     #[tokio::test]
     async fn diagnostics_report_uses_ok_shape() {
+        let _guard = crate::diagnostic_log::test_log_guard();
         let root = std::env::temp_dir().join(format!(
             "codex-pilot-route-test-{}",
             std::time::SystemTime::now()
@@ -296,10 +300,12 @@ mod tests {
         assert!(text.contains("[redacted]"));
         assert!(!text.contains("sk-test"));
         let _ = std::fs::remove_dir_all(root);
+        crate::diagnostic_log::clear_test_log_path();
     }
 
     #[tokio::test]
     async fn recycle_bin_list_uses_ok_shape() {
+        let _guard = crate::diagnostic_log::test_log_guard();
         let db_path = std::env::temp_dir().join(format!(
             "codex-pilot-core-recycle-{}.sqlite",
             std::time::SystemTime::now()
@@ -326,6 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn recycle_bin_entries_use_camel_case_fields() {
+        let _guard = crate::diagnostic_log::test_log_guard();
         let db_path = std::env::temp_dir().join(format!(
             "codex-pilot-core-recycle-camel-{}.sqlite",
             std::time::SystemTime::now()

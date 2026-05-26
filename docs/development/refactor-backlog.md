@@ -30,6 +30,8 @@
 | T14b  | 修复 Tauri 中 `window.confirm` 失效导致的前端阻塞 | P1 | 20 min | DONE |
 | T14c  | 修复诊断页“后端状态”与启动页/总览页连接判定不一致 | P1 | 15 min | DONE |
 | T15   | 修 .gitignore 把 docs/development 重要文档加白名单 | P2 | 5 min | DONE |
+| T10b  | provider 命令显式恢复点 snapshot | P2     | 2-4 h  | DONE |
+| T13b  | 修 routes.rs diagnostic_log 测试 flaky | P2 | 15 min | DONE |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
