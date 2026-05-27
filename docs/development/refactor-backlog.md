@@ -45,6 +45,7 @@
 | T20a  | `storage.rs` 拆分映射表调研（51 个内部 helper 归属） | P2 | 1 h | DONE |
 | T20b  | `storage.rs` 按 T20a 映射表机械搬运 | P2 | 2-3 h | DONE |
 | T20c  | `MAX_SORT_KEY_BATCH` 收窄到模块私有 | P2 | 1 min | DONE |
+| T21   | `markdown.rs` 拆分调研+映射一步出（1118 行，38 fn） | P2 | 45 min | TODO |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
@@ -1127,3 +1128,72 @@ for entry in fs::read_dir(source)? {
 - `cargo test --workspace` 全绿
 - `cargo fmt --check` 通过
 - 前端 npm test 通过
+
+---
+
+### T21 · `markdown.rs` 拆分调研+映射一步出
+
+**问题**：[crates/codex-pilot-data/src/markdown.rs](crates/codex-pilot-data/src/markdown.rs) 当前 1118 行、38 个 fn，但结构比 storage 简单很多（外部 caller 只有 2 处、不依赖事务）。所以这次**一步出位**——调研、映射表、可见性升级清单、执行计划合在一份报告里，不必拆 T21a/T21b。
+
+**前置事实**（已 grep 过，给 Codex 省时间）：
+- 外部 caller 只有 [routes_sessions.rs:84](crates/codex-pilot-core/src/routes_sessions.rs):84 / :97，都走 `MarkdownExportService::new`
+- 公开面只有 3 个：`ExportStatus` / `ExportResult` / `MarkdownExportService`
+- markdown.rs 反向依赖 storage 5 项（这是 T20a §8.1 撞到的根因）
+- 内部还有 `Message` / `MessageBlock` 两个非 pub type
+
+**Codex Prompt**：
+
+```
+对 crates/codex-pilot-data/src/markdown.rs（当前 1118 行）做拆分调研。本任务**一步出位**：分组建议、helper 映射、可见性升级、执行计划合在一份报告里。**不写任何拆分代码，也不新建任何 .rs 文件，只输出报告**。
+
+前置事实（已 grep 验证，节省你的时间）：
+
+- 外部调用面只有 2 处：`crates/codex-pilot-core/src/routes_sessions.rs:84` 和 `:97`，都走 `MarkdownExportService::new`
+- 公开面只有 3 个：`ExportStatus`、`ExportResult`、`MarkdownExportService`
+- markdown.rs **反向依赖 storage 5 项**：`SchemaKind` / `SessionRef` / `has_columns` / `normalize_session_id` / `schema_kind`（这是 T20a §8.1 里这几项必须保持 `pub(crate)` 的根因）
+- 内部还有两个非 pub type：`Message` / `MessageBlock`
+- 不依赖文件锁、不依赖 sqlite 事务，结构比 storage 简单
+
+参考：`docs/development/storage-split-mapping.md`（T20a 报告，做映射表的范式可以照搬，但 markdown.rs 简单，不必照搬全部 8 节）
+
+请输出报告 `docs/development/markdown-split-mapping.md`，包含：
+
+1. **目标文件结构**：建议拆成几个子文件、各自职责。直觉分组可能是：
+   - 入口编排（`export_generic_session` / `export_codex_thread` / `fetch_*` / `load_rollout_messages`）
+   - 数据模型（`Message` / `MessageBlock` 内部类型 + `ExportResult` / `ExportStatus` 公开类型）
+   - HTML/Markdown 渲染（`render_markdown` / `render_html` / `render_*_body` 等）
+   - format helper（`format_unix_utc` / `civil_from_days` / `split_fenced_code` / `text_blocks` 等）
+   如果你认为更合理的分组不同，可以提出，但要给理由。
+
+2. **所有顶层 fn / struct / enum / const 归属表**：列出当前 markdown.rs 里全部顶层项（不含 impl 内部方法），格式：
+   | 名称 | 当前行号 | 当前可见性 | callers | 建议归属 | 建议可见性 | 备注 |
+
+3. **可见性升级清单**：哪些需要升 `pub(super)` 才能让拆分成立；哪些可以保持私有。同时反向列出"不应该升级"清单（防漏）。
+
+4. **测试归属表**：当前 markdown.rs 是否有 `#[cfg(test)] mod tests`？如果有，每个测试归属到哪个子文件。
+
+5. **风险点**：
+   - markdown.rs 当前用到 storage 5 项 helper，拆分后是否要继续走 `use crate::storage::{...}`
+   - HTML / Markdown 渲染是否真能独立成纯函数子模块（输入 `[Message]`、输出 `String`）
+   - format helper 子模块是否会被未来其他模块复用（如果会，可见性该不该提升到 `pub(crate)`）
+   - 用 grep 验证 markdown.rs 是否还有调用方被我漏掉
+
+6. **执行计划**（参照 storage 10 步法的精简版）：每一步独立 commit、每步跑 `cargo test --workspace` 必须全绿。预计 4-6 步。
+
+7. **最小规则**（参照 storage-split-mapping.md 第 8 节）：实施时不动业务逻辑、不改公开 API、不重命名变量、不"顺手优化"。
+
+要求：
+
+- 报告自包含
+- 不要修改 markdown.rs 任何代码
+- 不要新建任何 .rs 文件
+- 不要修改 lib.rs / storage 子模块
+- 报告完成后把 `docs/development/refactor-backlog.md` 状态总览表 T21 行 TODO 改 DONE
+```
+
+**验收**：
+- 拿到一份 [markdown-split-mapping.md](docs/development/markdown-split-mapping.md)
+- 38 个顶层项全有归属
+- 可见性升级清单和"不应升级"清单都列了
+- 执行计划 4-6 步，每步独立 commit
+- 由维护者审一遍报告，决定要不要起 T21b 实施
