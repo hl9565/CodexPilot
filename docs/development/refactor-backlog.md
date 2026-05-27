@@ -46,6 +46,7 @@
 | T20b  | `storage.rs` 按 T20a 映射表机械搬运 | P2 | 2-3 h | DONE |
 | T20c  | `MAX_SORT_KEY_BATCH` 收窄到模块私有 | P2 | 1 min | DONE |
 | T21   | `markdown.rs` 拆分调研+映射一步出（1118 行，38 fn） | P2 | 45 min | DONE |
+| T21b  | `markdown.rs` 按 T21 映射表机械搬运（5 步） | P2 | 1-2 h | TODO（依赖 T21） |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
@@ -1197,3 +1198,65 @@ for entry in fs::read_dir(source)? {
 - 可见性升级清单和"不应升级"清单都列了
 - 执行计划 4-6 步，每步独立 commit
 - 由维护者审一遍报告，决定要不要起 T21b 实施
+
+---
+
+### T21b · `markdown.rs` 按 T21 映射表机械搬运
+
+**前置依赖**：T21 已 DONE，报告 [docs/development/markdown-split-mapping.md](docs/development/markdown-split-mapping.md) 已被维护者审查通过（2026-05-27）。
+
+**Codex Prompt**：
+
+```
+按 docs/development/markdown-split-mapping.md（已在仓库里）的第 6 节 5 步执行计划，把 crates/codex-pilot-data/src/markdown.rs 拆成 markdown/ 目录下的多个子模块。
+
+前置阅读（必读，全文）：
+
+- docs/development/markdown-split-mapping.md
+- 特别精读：§1 目标结构、§2 归属表、§3 可见性升级清单（含 §3.x 不应升级清单）、§4 测试归属、§5 风险点、§6 执行计划、§7 最小规则
+
+**Codex 交付协议**：本次任务严格遵守 docs/development/refactor-backlog.md 顶部"使用方式"段的 Codex 交付协议 4 条（commit message 格式 / 不要自己 push / 汇报必须列每个 commit hash / 跨范围 fmt 单独 commit）。
+
+补充说明（报告 §6 没说透的 2 条细节）：
+
+1. **第 1 步建骨架** 时，对每个待用子模块（models.rs / export.rs / render.rs / format.rs）先创建空文件（只允许一行 `// placeholder, content arrives in later steps`），让 cargo check 过。markdown/mod.rs 在第 1 步保留 `MarkdownExportService` 结构体定义、`impl MarkdownExportService` 方法块、`ExportFormat` 枚举、以及全部 `#[cfg(test)] mod tests`——这一步**只换文件位置，不搬代码**。
+
+2. **第 1 步搬运的具体形态**：把当前 `crates/codex-pilot-data/src/markdown.rs` 改名/移动到 `crates/codex-pilot-data/src/markdown/mod.rs`，然后顶部加 `mod models;` `mod export;` `mod render;` `mod format;` 四行声明（指向空占位文件）。第 1 步 commit message 用 `T21b 第 1 步：建立 markdown/ 目录骨架`。
+
+执行硬性约束：
+
+- 每一步独立 commit，message 用 `T21b 第 N 步：<报告 §6 该步的标题>`
+- 严格机械搬运：不改函数体、不改测试断言、不改公开 API 签名、不调整 impl 内方法顺序、不"顺手"修 import 风格、不重命名变量
+- 可见性严格按报告 §3 升级，不私自把别的 fn 升 pub(super) 或 pub(crate)
+- 不要新增对 storage 子模块的反向依赖（§5.1 已说明：继续走 `use crate::storage::{...}`，不要改 storage 的可见性）
+- `render_html` 调用 `exported_at_label()` 的系统时间薄依赖保留不动（§5.2）
+- 不要把 format helper 预先升到 `pub(crate)`（§5.3）
+- 每一步搬完跑 `cargo fmt -p codex-pilot-data` + `cargo test --workspace`，必须全绿才能进入下一步
+- 用 `-p codex-pilot-data` 限定 fmt 范围，避免类似 T20b 那种触发 workspace 级 fmt 收尾
+
+全部 5 步做完后最终跑：
+
+- `cargo fmt --check`（如果报告 storage 之外的文件未格式化，按交付协议第 4 条单独起 `chore: workspace cargo fmt 收尾` commit）
+- `cargo test --workspace`
+- `cd apps/codex-pilot-manager && npm test`
+- `rg -n "pub\(crate\) fn|pub\(crate\) enum|pub\(crate\) const" crates/codex-pilot-data/src/markdown`（核对没有遗漏过宽可见性）
+- 确认 `codex_pilot_data::markdown::MarkdownExportService` / `ExportStatus` / `ExportResult` 外部路径完全不变（routes_sessions.rs:84/:97 不需要改）
+
+完成后把 docs/development/refactor-backlog.md 状态总览表 T21b 行 TODO 改 DONE。
+
+绝对禁止：
+
+- 不要修改 lib.rs
+- 不要修改 markdown.rs / markdown/* 之外的任何运行时代码
+- 不要在搬代码的同时改算法或文案
+- 不要重命名任何 fn / struct / field
+- 不要静默调整报告——如果实施期发现报告与代码不一致，先在 docs/development/markdown-split-mapping.md 末尾追加 "## 9. 实施期发现" 章节记录，再决定是否调整该步骤
+```
+
+**验收**：
+- markdown.rs 被拆成 markdown/mod.rs + 4 个子文件
+- `git log --oneline` 显示按 §6 5 步分了独立 commit
+- 外部 `codex_pilot_data::markdown::*` 路径零改动
+- `cargo test --workspace` 全绿
+- `cargo fmt --check` 通过
+- 前端 npm test 通过
