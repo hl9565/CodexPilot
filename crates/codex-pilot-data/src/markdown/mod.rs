@@ -1,3 +1,8 @@
+mod export;
+mod format;
+mod models;
+mod render;
+
 use crate::storage::{SchemaKind, SessionRef, has_columns, normalize_session_id, schema_kind};
 use anyhow::Context;
 use rusqlite::Connection;
