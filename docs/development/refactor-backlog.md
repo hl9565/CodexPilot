@@ -48,6 +48,7 @@
 | T21   | `markdown.rs` 拆分调研+映射一步出（1118 行，38 fn） | P2 | 45 min | DONE |
 | T21b  | `markdown.rs` 按 T21 映射表机械搬运（5 步） | P2 | 1-2 h | DONE |
 | T22   | `provider_sync.rs` 拆分调研+映射一步出（1106 行，41 fn） | P2 | 45 min | DONE |
+| T22b  | `provider_sync.rs` 按 T22 映射表机械搬运（5 步） | P2 | 1-2 h | TODO（依赖 T22） |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
@@ -1338,3 +1339,70 @@ for entry in fs::read_dir(source)? {
 - 文件锁归属、SessionChange pipeline 共享性分析清楚
 - 执行计划 4-6 步
 - 由维护者审一遍报告，决定要不要起 T22b 实施
+
+---
+
+### T22b · `provider_sync.rs` 按 T22 映射表机械搬运
+
+**前置依赖**：T22 已 DONE，报告 [docs/development/provider-sync-split-mapping.md](docs/development/provider-sync-split-mapping.md) 已被维护者审查通过（2026-05-27）。
+
+**T22 报告 by-product 澄清**：报告 §7 提到 provider_sync.rs:729 有 `std::thread::sleep`。维护者核查后确认那是 `std::thread::spawn` 起的独立 OS 线程，不在 tokio runtime 上，**不违反 AGENTS.md 第 3 条**，**T22b 不要修这一处**。
+
+**Codex Prompt**：
+
+```
+按 docs/development/provider-sync-split-mapping.md（已在仓库里）的第 6 节 5 步执行计划，把 crates/codex-pilot-data/src/provider_sync.rs 拆成 provider_sync/ 目录下的多个子模块。
+
+前置阅读（必读，全文）：
+
+- docs/development/provider-sync-split-mapping.md
+- 特别精读：§1 目标结构（6 个子文件 + 反证为什么不合并 5 个）、§2 归属表、§3 可见性升级清单（含"不应升级"清单）、§4 测试归属、§5 风险点（特别 §5.5 run 编排边界）、§6 执行计划、§7 最小规则、§8 验收要点
+
+**Codex 交付协议**：本次任务严格遵守 docs/development/refactor-backlog.md 顶部"使用方式"段的 Codex 交付协议 4 条（commit message 格式 / 不要自己 push / 汇报必须列每个 commit hash / 跨范围 fmt 单独 commit）。
+
+补充说明（参考报告基础上的 3 条澄清）：
+
+1. **§7 提到的 `std::thread::sleep` 不属于本次范围**：维护者已核查 provider_sync.rs:729 那一处在 `std::thread::spawn` 起的独立 OS 线程里，不在 tokio runtime 上，不违反 AGENTS.md 第 3 条。**不要修这一处**，按 §7 规则保留原样。
+
+2. **第 1 步建骨架** 时，对每个待用子模块（models.rs / inspect.rs / run.rs / session_changes.rs / sqlite.rs / filesystem.rs）先创建空文件（只允许一行 `// placeholder, content arrives in later steps`），让 cargo check 过。第 1 步**只换文件位置**，原文件内容保留在 provider_sync/mod.rs 中。第 1 步 commit message 用 `T22b 第 1 步：搭骨架，不搬逻辑`。
+
+3. **§5.5 边界提醒严格遵守**：run.rs 只保留流程控制 + 锁 + 延迟复检调度（`acquire_lock` / `release_lock` / `schedule_provider_sync_delayed_recheck`）；其余 9 件事（inspect 式预检查 / 诊断日志 / 备份 / rollout 改写 / SQLite 事务 / global state 更新 / 失败回滚 等）作为被调用方下沉到 sqlite.rs / session_changes.rs / filesystem.rs。不要让 run.rs 重新成为大杂烩。
+
+执行硬性约束：
+
+- 每一步独立 commit，message 用 `T22b 第 N 步：<报告 §6 该步的标题>`
+- 严格机械搬运：不改函数体、不改测试断言、不改公开 API 签名、不调整 impl 内方法顺序、不"顺手"修 import 风格、不重命名变量
+- 可见性严格按报告 §3 升级，不私自把别的 fn 升 `pub(super)` 或 `pub(crate)`
+- **8 个公开面对外路径必须保持 `codex_pilot_data::provider_sync::<name>` 不变**，由 mod.rs 的 `pub use` 重新导出
+- 不要改 storage / markdown / lib.rs / codex-pilot-core / codex-pilot-manager
+- 每一步搬完跑 `cargo fmt -p codex-pilot-data` + `cargo test --workspace`，必须全绿才能进入下一步
+- 用 `-p codex-pilot-data` 限定 fmt 范围，避免类似 T20b 那种触发 workspace 级 fmt 收尾
+
+全部 5 步做完后最终跑：
+
+- `cargo fmt --check`（如报告 codex-pilot-data 之外未格式化，按交付协议第 4 条单独 `chore: workspace cargo fmt 收尾` commit）
+- `cargo test --workspace`
+- `cd apps/codex-pilot-manager && npm test`
+- `rg -n "pub\(crate\) fn|pub\(crate\) enum|pub\(crate\) const" crates/codex-pilot-data/src/provider_sync`（核对没有遗漏过宽可见性）
+- 确认外部 5 个文件 8 处调用 + 1 处类型签名引用都没需要改路径
+
+完成后把 docs/development/refactor-backlog.md 状态总览表 T22b 行 TODO 改 DONE。
+
+绝对禁止：
+
+- 不要修 std::thread::sleep（见澄清 1）
+- 不要修 std::thread::sleep 之外任何"看上去能优化"的代码
+- 不要顺手改 storage / markdown
+- 不要在搬代码的同时改算法或日志文案
+- 不要重命名任何 fn / struct / field
+- 不要静默调整报告——如果实施期发现报告与代码不一致，先在 provider-sync-split-mapping.md 末尾追加 "## 9. 实施期发现" 章节记录，再决定是否调整该步骤
+```
+
+**验收**：
+- provider_sync.rs 被拆成 provider_sync/mod.rs + 6 个子文件
+- `git log --oneline` 显示按 §6 5 步分了独立 commit
+- 外部 `codex_pilot_data::provider_sync::*` 路径零改动
+- `cargo test --workspace` 全绿
+- `cargo fmt --check` 通过
+- 前端 npm test 通过
+- run.rs 没有变成大杂烩（按 §5.5 边界）
