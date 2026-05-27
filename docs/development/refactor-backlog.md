@@ -47,6 +47,7 @@
 | T20c  | `MAX_SORT_KEY_BATCH` 收窄到模块私有 | P2 | 1 min | DONE |
 | T21   | `markdown.rs` 拆分调研+映射一步出（1118 行，38 fn） | P2 | 45 min | DONE |
 | T21b  | `markdown.rs` 按 T21 映射表机械搬运（5 步） | P2 | 1-2 h | DONE |
+| T22   | `provider_sync.rs` 拆分调研+映射一步出（1106 行，41 fn） | P2 | 45 min | TODO |
 
 完成顺序建议：T00 → T01 → T02 → T03 → **T11** → T12 → T05 → T04 → T08 → T07 → T06 → T09 → T10 → T13。
 T11 是 T03 验收阻塞项，必须先解。T12 是 T03 发现的漏网鱼，顺手收掉。
@@ -1260,3 +1261,80 @@ for entry in fs::read_dir(source)? {
 - `cargo test --workspace` 全绿
 - `cargo fmt --check` 通过
 - 前端 npm test 通过
+
+---
+
+### T22 · `provider_sync.rs` 拆分调研+映射一步出
+
+**问题**：[crates/codex-pilot-data/src/provider_sync.rs](crates/codex-pilot-data/src/provider_sync.rs) 当前 1106 行、41 个 fn。是 backlog "三大文件" 中最后一个未动的。同 T21 范式一步出位：调研 + 映射 + 执行计划合在一份报告里。
+
+**前置事实**（已 grep 验证）：
+- **公开面 8 个**：`ProviderSyncStatus` / `ProviderSyncResult` / `ProviderCount` / `ProviderSyncInspection` + `inspect_provider_sync` / `inspect_provider_sync_with_target` / `run_provider_sync` / `run_provider_sync_with_target`
+- **外部 caller 散落 5 个文件 8 处**（provider.rs / launch_helpers.rs / lib.rs / provider_store_types.rs / diagnostics.rs）
+- 不反向依赖 storage / markdown ✓
+- 涉及文件锁、有文件写入
+- 4 个常量
+
+**Codex Prompt**：
+
+```
+对 crates/codex-pilot-data/src/provider_sync.rs（当前 1106 行）做拆分调研。本任务**一步出位**：分组建议、helper 映射、可见性升级、执行计划合在一份报告里。**不写任何拆分代码，也不新建任何 .rs 文件，只输出报告**。
+
+前置事实（已 grep 验证，节省你的时间）：
+
+- **公开面 8 个**：`ProviderSyncStatus` / `ProviderSyncResult` / `ProviderCount` / `ProviderSyncInspection` / `inspect_provider_sync` / `inspect_provider_sync_with_target` / `run_provider_sync` / `run_provider_sync_with_target`
+- **外部 caller 散落 5 个文件 8 处**：
+  - `apps/codex-pilot-manager/src-tauri/src/commands/provider.rs`（3 处：`provider_sync_message` / 2 个 `_with_target` 调用）
+  - `apps/codex-pilot-manager/src-tauri/src/commands/launch_helpers.rs`（3 处：inspect / run / `ProviderSyncStatus::Synced` 断言）
+  - `apps/codex-pilot-manager/src-tauri/src/lib.rs`（1 处：`format_provider_counts` 用 `ProviderCount`）
+  - `apps/codex-pilot-manager/src-tauri/src/provider_store_types.rs`（2 处：`rollout_providers` / `sqlite_providers` 字段用 `ProviderCount`）
+  - `apps/codex-pilot-manager/src-tauri/src/commands/diagnostics.rs`（1 处：inspect）
+- **不反向依赖 storage / markdown**（grep 无命中）
+- **4 个常量**：`DEFAULT_PROVIDER` / `SESSION_DIRS` / `BACKUP_KEEP_COUNT` / `MANAGED_BY`
+- 涉及文件锁（`acquire_lock` / `release_lock`），有文件写入
+
+参考：`docs/development/markdown-split-mapping.md`（T21 报告，同样一步出位的范式，可以照搬结构）；`docs/development/storage-split-mapping.md`（T20a 报告，可见性升级清单的正反列法）。
+
+请输出报告 `docs/development/provider-sync-split-mapping.md`，包含：
+
+1. **目标文件结构**：建议拆成几个子文件、各自职责。直觉分组可能是：
+   - 公开模型（`ProviderSyncStatus` / `ProviderSyncResult` / `ProviderCount` / `ProviderSyncInspection` + 结果构造 helper）
+   - inspect 编排（`inspect_provider_sync` / `inspect_provider_sync_with_target` / inspect 专属 helper）
+   - run 编排（`run_provider_sync` / `run_provider_sync_with_target` / run 专属 helper）
+   - IO 层（rollout 文件遍历、备份创建、文件锁、session index）
+   - 共享 helper（normalize、provider 计数、拆行）
+   如果你认为更合理的分组不同，可以提出，但要给理由。
+
+2. **所有顶层 fn / struct / enum / const 归属表**：列出当前 provider_sync.rs 里全部顶层项，格式：
+   | 名称 | 当前行号 | 当前可见性 | callers | 建议归属 | 建议可见性 | 备注 |
+
+3. **可见性升级清单**：哪些需要升 `pub(super)` 才能让拆分成立；哪些可以保持私有。同时反向列出"不应该升级"清单（防漏）。**8 个公开面对外路径必须保持 `codex_pilot_data::provider_sync::<name>` 不变**，由 mod.rs 的 `pub use` 重新导出。
+
+4. **测试归属表**：当前 provider_sync.rs 是否有 `#[cfg(test)] mod tests`？如果有，每个测试归属到哪个子文件。
+
+5. **风险点**：
+   - 文件锁（`acquire_lock` / `release_lock`）是 inspect/run 共用还是 run 独占？拆分后落在哪个子模块
+   - inspect 和 run 是否共用同一套 `SessionChange` pipeline——能否抽出"变更收集"子模块给两者共用
+   - 4 个常量（`DEFAULT_PROVIDER` / `SESSION_DIRS` / `BACKUP_KEEP_COUNT` / `MANAGED_BY`）的归属——是放共享 helper 还是各模块自己持有
+   - 用 grep 验证 8 处外部 caller 是不是真的都在我列的 5 个文件里，有没有遗漏
+
+6. **执行计划**（参照 markdown 5 步法或 storage 10 步法的精简版）：每一步独立 commit、每步跑 `cargo test --workspace` 必须全绿。预计 4-6 步。
+
+7. **最小规则**（参照 markdown-split-mapping.md §7 / storage-split-mapping.md §8）：实施时不动业务逻辑、不改公开 API、不重命名变量、不"顺手优化"、不要顺手改 storage 或 markdown 模块。
+
+要求：
+
+- 报告自包含
+- 不要修改 provider_sync.rs 任何代码
+- 不要新建任何 .rs 文件
+- 不要修改 lib.rs / storage / markdown 子模块
+- 报告完成后把 `docs/development/refactor-backlog.md` 状态总览表 T22 行 TODO 改 DONE
+```
+
+**验收**：
+- 拿到一份 [provider-sync-split-mapping.md](docs/development/provider-sync-split-mapping.md)
+- 41 个顶层项 + 4 个常量全有归属
+- 可见性升级清单和"不应升级"清单都列了
+- 文件锁归属、SessionChange pipeline 共享性分析清楚
+- 执行计划 4-6 步
+- 由维护者审一遍报告，决定要不要起 T22b 实施
