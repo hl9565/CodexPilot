@@ -1,11 +1,10 @@
 import * as React from "react";
-import { Activity, LogIn, Stethoscope, Terminal, Trash2 } from "lucide-react";
+import { Activity, Stethoscope, Terminal, Trash2 } from "lucide-react";
 import { Metric } from "../components/primitives";
 import type {
   BackendStatus,
   DiagnosticsSnapshot,
   LaunchSnapshot,
-  ProviderSnapshot,
   RecycleBinSnapshot,
   ViewId,
 } from "../types";
@@ -21,17 +20,10 @@ function backendStatusLabel(status: BackendStatus | null): string {
   return status.status || "未连接";
 }
 
-function runModeLabel(mode: ProviderSnapshot["mode"]): string {
-  if (mode === "hybridApi") return "混合中转";
-  if (mode === "api") return "传统中转";
-  return "官方通道";
-}
-
 export function OverviewView({
   status,
   appVersion,
   launch,
-  provider,
   recycleBin,
   diagnostics,
   onNavigate,
@@ -39,7 +31,6 @@ export function OverviewView({
   status: BackendStatus | null;
   appVersion: string | null;
   launch: LaunchSnapshot | null;
-  provider: ProviderSnapshot | null;
   recycleBin: RecycleBinSnapshot | null;
   diagnostics: DiagnosticsSnapshot | null;
   onNavigate: (view: ViewId) => void;
@@ -49,12 +40,7 @@ export function OverviewView({
   const diagnosticsChecks = diagnostics?.checks ?? [];
   const failingChecks = diagnosticsChecks.filter((check) => !["ok", "pass", "passed"].includes(check.status)).length;
   const backendState = backendStatusLabel(status);
-  const providerMode = runModeLabel(provider?.mode ?? "official");
   const displayVersion = appVersion ?? status?.version ?? "未知";
-  const providerSummaryTitle = provider?.profile ?? "默认中转";
-  const providerSummaryDetail = provider?.degraded
-    ? "已检测到官方登录，但还没有可用恢复点，所以当前暂时按自动中转生效。"
-    : provider?.statusMessage ?? "系统会根据官方登录和恢复点自动决定当前怎么生效。";
 
   return (
     <div className="taskStack">
@@ -85,46 +71,6 @@ export function OverviewView({
           <span className={`statusDot ${canRunLaunchAction(launch) ? "ok" : "warning"}`} />
           <span>{launch?.detail ?? "需要检查 Codex 应用路径或启动偏好"}</span>
           <button className="linkButton" onClick={() => onNavigate("launch")} type="button">查看启动设置</button>
-        </div>
-      </section>
-
-      <section className="taskPanel providerTask">
-        <div className="taskHeader">
-          <div>
-            <div className="panelTitle compactTitle titleLine">
-              <span className="titleIcon">
-                <LogIn size={16} />
-              </span>
-              <h2>当前配置档</h2>
-            </div>
-            <p className="taskSummary">系统会根据官方登录和恢复点自动决定当前怎么生效，详细维护在配置档页面。</p>
-          </div>
-          <button className="secondary" onClick={() => onNavigate("provider")} type="button">管理配置档</button>
-        </div>
-        <div className="providerOverviewBody">
-          <div className={`providerSummaryCard ${provider?.degraded ? "warning" : ""}`}>
-            <span className="providerSummaryLabel">当前使用</span>
-            <strong>{providerSummaryTitle}</strong>
-            <p>{providerSummaryDetail}</p>
-          </div>
-          <div className="providerSummaryGrid">
-            <div className="summaryMetric">
-              <span>官方登录</span>
-              <strong>{provider?.authenticated ? "已检测" : "未检测"}</strong>
-            </div>
-            <div className="summaryMetric">
-              <span>官方恢复点</span>
-              <strong>{provider?.officialSnapshotAvailable ? "已准备" : "未准备"}</strong>
-            </div>
-            <div className="summaryMetric">
-              <span>配置档</span>
-              <strong>{providerSummaryTitle}</strong>
-            </div>
-            <div className="summaryMetric">
-              <span>账号</span>
-              <strong>{provider?.accountLabel ?? "未读取到账号信息"}</strong>
-            </div>
-          </div>
         </div>
       </section>
 

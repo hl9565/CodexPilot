@@ -6,7 +6,6 @@ import {
   Bot,
   CheckCircle2,
   History,
-  LogIn,
   Moon,
   Play,
   RefreshCw,
@@ -21,14 +20,11 @@ import { resolveAutoLaunchAction } from "./autoLaunch";
 import { DiagnosticsView } from "./views/DiagnosticsView";
 import { LaunchView } from "./views/LaunchView";
 import { OverviewView } from "./views/OverviewView";
-import { ProviderView } from "./views/ProviderView";
 import { RecycleBinView } from "./views/RecycleBinView";
 import {
   type BackendStatus,
-  type CcsProviderSnapshot,
   type DiagnosticsSnapshot,
   type LaunchSnapshot,
-  type ProviderSnapshot,
   type RecycleBinSnapshot,
   THEME_STORAGE_KEY,
   type Theme,
@@ -39,7 +35,6 @@ import "./styles.css";
 const views: Array<{ id: ViewId; label: string; icon: React.ElementType }> = [
   { id: "overview", label: "总览", icon: Activity },
   { id: "launch", label: "启动与注入", icon: Terminal },
-  { id: "provider", label: "模型通道", icon: LogIn },
   { id: "sessions", label: "对话维护", icon: History },
   { id: "diagnostics", label: "诊断", icon: Stethoscope },
 ];
@@ -50,8 +45,6 @@ function App() {
   const [status, setStatus] = React.useState<BackendStatus | null>(null);
   const [appVersion, setAppVersion] = React.useState<string | null>(null);
   const [launch, setLaunch] = React.useState<LaunchSnapshot | null>(null);
-  const [provider, setProvider] = React.useState<ProviderSnapshot | null>(null);
-  const [ccsProvider, setCcsProvider] = React.useState<CcsProviderSnapshot | null>(null);
   const [recycleBin, setRecycleBin] = React.useState<RecycleBinSnapshot | null>(null);
   const [diagnostics, setDiagnostics] = React.useState<DiagnosticsSnapshot | null>(null);
   const [message, setMessage] = React.useState("就绪");
@@ -93,12 +86,6 @@ function App() {
       callBackend<LaunchSnapshot>("launch_snapshot")
         .then(setLaunch)
         .catch(() => setLaunch(null)),
-      callBackend<ProviderSnapshot>("provider_snapshot")
-        .then(setProvider)
-        .catch(() => setProvider(null)),
-      callBackend<CcsProviderSnapshot>("ccs_provider_snapshot")
-        .then(setCcsProvider)
-        .catch(() => setCcsProvider(null)),
       callBackend<RecycleBinSnapshot>("recycle_bin_snapshot")
         .then(setRecycleBin)
         .catch(() => setRecycleBin(null)),
@@ -361,22 +348,12 @@ function App() {
             status={status}
             appVersion={appVersion}
             launch={launch}
-            provider={provider}
             recycleBin={recycleBin}
             diagnostics={diagnostics}
             onNavigate={setActiveView}
           />
         )}
         {activeView === "launch" && <LaunchView status={status} launch={launch} onRefresh={refresh} />}
-        {activeView === "provider" && (
-          <ProviderView
-            ccsProvider={ccsProvider}
-            provider={provider}
-            onMessage={notify}
-            onProgress={setProgressMessage}
-            onRefresh={refresh}
-          />
-        )}
         {activeView === "sessions" && (
           <RecycleBinView
             recycleBin={recycleBin}

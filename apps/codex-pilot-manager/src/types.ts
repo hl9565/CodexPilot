@@ -22,84 +22,9 @@ export type LaunchSnapshot = {
   commandPreview: string[];
 };
 
-export type ProviderSnapshot = {
-  activeProvider: string;
-  mode: RunMode;
-  profile: string;
-  source: string;
-  authPath: string;
-  configured: boolean;
-  authenticated: boolean;
-  accountLabel: string | null;
-  routeLabel: string;
-  statusMessage: string;
-  degraded: boolean;
-  officialSnapshotAvailable: boolean;
-  backupSnapshotAvailable: boolean;
-  profiles: ProviderProfile[];
-  activeProfileId: string;
-};
-
-export type CcsProviderSnapshot = {
-  dbPath: string;
-  availableCount: number;
-  importableCount: number;
-  status: string;
-  message: string;
-};
-
-export type ProviderProfile = {
-  id: string;
-  name: string;
-  baseUrl: string;
-  bearerToken: string;
-  mode: ProviderProfileMode;
-  upstreamProtocol: UpstreamProtocol;
-  authenticatedBehavior: AuthenticatedBehavior;
-};
-
-export type RunMode = "official" | "hybridApi" | "api";
-export type ProviderProfileMode = "hybridApi" | "api";
-export type AuthenticatedBehavior = "relay" | "officialDirect";
-export type UpstreamProtocol = "responses" | "chatCompletions" | "anthropicMessages";
 export type Theme = "light" | "dark";
 
 export const THEME_STORAGE_KEY = "codex-pilot-theme";
-
-export type ProviderProfileSaveResponse = {
-  id: string;
-  message: string;
-};
-
-export type OfficialSnapshotImportResult = {
-  message: string;
-  provider: ProviderSnapshot;
-};
-
-export type OfficialSnapshotPrepareResult = {
-  message: string;
-  provider: ProviderSnapshot;
-};
-
-export type ProviderProfileSaveRequest = {
-  id: string | null;
-  name: string;
-  baseUrl: string;
-  bearerToken: string;
-  mode: ProviderProfileMode;
-  upstreamProtocol: UpstreamProtocol;
-  authenticatedBehavior: AuthenticatedBehavior;
-  activate: boolean;
-};
-
-export type CcsImportResult = {
-  importedCount: number;
-  skippedCount: number;
-  renamedCount: number;
-  provider: ProviderSnapshot;
-  ccs: CcsProviderSnapshot;
-  message: string;
-};
 
 export type ProviderCount = {
   provider: string;
@@ -209,4 +134,4 @@ export type EnhancementSettings = {
   forcePluginInstall: boolean;
 };
 
-export type ViewId = "overview" | "launch" | "provider" | "sessions" | "diagnostics";
+export type ViewId = "overview" | "launch" | "sessions" | "diagnostics";
