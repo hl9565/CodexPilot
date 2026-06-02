@@ -120,10 +120,9 @@ pub(crate) async fn sync_provider_sessions(
     tauri::async_runtime::spawn_blocking(move || {
         let target_provider = requested_target(request)?;
         let result = match target_provider.as_deref() {
-            Some(target) => codex_pilot_data::provider_sync::run_provider_sync_with_target(
-                None,
-                Some(target),
-            ),
+            Some(target) => {
+                codex_pilot_data::provider_sync::run_provider_sync_with_target(None, Some(target))
+            }
             None => codex_pilot_data::provider_sync::run_provider_sync(None),
         };
         Ok(provider_sync_message(result))

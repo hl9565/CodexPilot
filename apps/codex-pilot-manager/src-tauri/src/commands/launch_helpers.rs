@@ -60,9 +60,10 @@ pub(crate) async fn auto_sync_sessions_after_launch(
         return success_message.to_string();
     }
 
-    let inspection_result =
-        tauri::async_runtime::spawn_blocking(|| codex_pilot_data::provider_sync::inspect_provider_sync(None))
-            .await;
+    let inspection_result = tauri::async_runtime::spawn_blocking(|| {
+        codex_pilot_data::provider_sync::inspect_provider_sync(None)
+    })
+    .await;
 
     let inspection = match inspection_result {
         Ok(Ok(value)) => value,
@@ -109,9 +110,10 @@ pub(crate) async fn auto_sync_sessions_after_launch(
         };
     }
 
-    let sync_result =
-        tauri::async_runtime::spawn_blocking(|| codex_pilot_data::provider_sync::run_provider_sync(None))
-            .await;
+    let sync_result = tauri::async_runtime::spawn_blocking(|| {
+        codex_pilot_data::provider_sync::run_provider_sync(None)
+    })
+    .await;
 
     let sync_result = match sync_result {
         Ok(value) => value,

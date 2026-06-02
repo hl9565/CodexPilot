@@ -350,5 +350,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(backup_dir);
         let _ = std::fs::remove_file(db_path);
     }
-
 }

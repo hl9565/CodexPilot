@@ -55,29 +55,28 @@ async fn handle_connection(mut stream: tokio::net::TcpStream) -> anyhow::Result<
         return Ok(());
     }
 
-    let (status, content_type, body) = if path == "/backend/status"
-        && matches!(method, "GET" | "POST")
-    {
-        (
-            "200 OK".to_string(),
-            "application/json; charset=utf-8".to_string(),
-            serde_json::to_vec(&json!({
-                "status": "ok",
-                "message": "CodexPilot 后端已连接",
-                "version": crate::version::VERSION,
-                "transport": "http-helper"
-            }))?,
-        )
-    } else {
-        (
-            "404 Not Found".to_string(),
-            "application/json; charset=utf-8".to_string(),
-            serde_json::to_vec(&json!({
-                "status": "failed",
-                "message": "未知后端路径"
-            }))?,
-        )
-    };
+    let (status, content_type, body) =
+        if path == "/backend/status" && matches!(method, "GET" | "POST") {
+            (
+                "200 OK".to_string(),
+                "application/json; charset=utf-8".to_string(),
+                serde_json::to_vec(&json!({
+                    "status": "ok",
+                    "message": "CodexPilot 后端已连接",
+                    "version": crate::version::VERSION,
+                    "transport": "http-helper"
+                }))?,
+            )
+        } else {
+            (
+                "404 Not Found".to_string(),
+                "application/json; charset=utf-8".to_string(),
+                serde_json::to_vec(&json!({
+                    "status": "failed",
+                    "message": "未知后端路径"
+                }))?,
+            )
+        };
 
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
