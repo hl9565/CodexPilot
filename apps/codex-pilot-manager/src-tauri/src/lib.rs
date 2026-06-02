@@ -320,6 +320,8 @@ mod tests {
             timeline: true,
             inline_actions: false,
             scroll_restore: true,
+            plugin_entry_unlock: false,
+            force_plugin_install: true,
         };
 
         save_enhancement_settings_to_path(&path, &settings).unwrap();

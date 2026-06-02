@@ -52,14 +52,11 @@
     enabled: true,
     timeline: true,
     inlineActions: true,
-    scrollRestore: true
+    scrollRestore: true,
+    pluginEntryUnlock: true,
+    forcePluginInstall: true
   };
   let enhancementSettings = { ...defaultEnhancementSettings };
-  let pluginPatchStatus = {
-    loaded: false,
-    mode: "official",
-    pluginPatchEnabled: false
-  };
 
   function isActiveBoot() {
     return window.__CODEX_PILOT_BOOT_ID__ === bootId;
@@ -86,9 +83,6 @@
     },
     enhancementSettings() {
       return this.bridge("/enhancement/settings");
-    },
-    pluginPatchStatus() {
-      return this.bridge("/provider/plugin-patch-status");
     },
     detectSession() {
       return detectCurrentSession();
@@ -134,7 +128,9 @@
       enabled: source.enabled !== false,
       timeline: source.timeline !== false,
       inlineActions: source.inlineActions !== false,
-      scrollRestore: source.scrollRestore !== false
+      scrollRestore: source.scrollRestore !== false,
+      pluginEntryUnlock: source.pluginEntryUnlock !== false,
+      forcePluginInstall: source.forcePluginInstall !== false
     };
   }
 
@@ -150,28 +146,13 @@
     return enhancementSettings;
   }
 
-  function pluginPatchEnabled() {
-    return pluginPatchStatus.loaded && pluginPatchStatus.pluginPatchEnabled;
-  }
-
-  async function loadPluginPatchStatus() {
-    try {
-      const response = await window.__CODEX_PILOT__.pluginPatchStatus();
-      const result = response.result || response;
-      pluginPatchStatus = {
-        loaded: true,
-        mode: String(result.mode || "official"),
-        pluginPatchEnabled: Boolean(result.pluginPatchEnabled)
-      };
-    } catch (error) {
-      pluginPatchStatus = {
-        loaded: false,
-        mode: "official",
-        pluginPatchEnabled: false
-      };
-      reportRendererEvent("plugin_patch_status_error", { message: String(error) });
+  function applyPluginPatches() {
+    if (enhancementSettings.pluginEntryUnlock) {
+      enablePluginEntry();
+    } else {
+      clearPluginPatchArtifacts();
     }
-    return pluginPatchStatus;
+    unblockPluginInstallButtons();
   }
 
   function ensureStyles() {
@@ -756,7 +737,7 @@
   }
 
   function enablePluginEntry() {
-    if (!pluginPatchEnabled()) return;
+    if (!enhancementSettings.pluginEntryUnlock) return;
     const pluginButton = pluginEntryButton();
     if (!pluginButton) return;
     spoofChatGPTAuthMethod(pluginButton);
@@ -847,7 +828,7 @@
   }
 
   function unblockPluginInstallButtons() {
-    if (!pluginPatchEnabled()) return;
+    if (!enhancementSettings.forcePluginInstall) return;
     pluginInstallCandidates().forEach((button) => {
       const text = installButtonLabel(button);
       if (!isInstallButtonLabel(text)) return;
@@ -1819,12 +1800,7 @@
   }
 
   function startRefreshLoop() {
-    if (pluginPatchEnabled()) {
-      enablePluginEntry();
-      unblockPluginInstallButtons();
-    } else {
-      clearPluginPatchArtifacts();
-    }
+    applyPluginPatches();
     if (enhancementSettings.inlineActions) refreshSessionActions();
     if (enhancementSettings.scrollRestore) installScrollRestore();
     if (enhancementSettings.timeline) refreshTimelineSoon();
@@ -1834,10 +1810,7 @@
           observer.disconnect();
           return;
         }
-        if (pluginPatchEnabled()) {
-          enablePluginEntry();
-          unblockPluginInstallButtons();
-        }
+        applyPluginPatches();
         if (enhancementSettings.inlineActions) refreshSessionActions();
         if (enhancementSettings.timeline) refreshTimelineSoon();
       });
@@ -1846,10 +1819,7 @@
     if (typeof window.setInterval === "function") {
       window.setInterval(() => {
         if (!isActiveBoot()) return;
-        if (pluginPatchEnabled()) {
-          enablePluginEntry();
-          unblockPluginInstallButtons();
-        }
+        applyPluginPatches();
         if (enhancementSettings.inlineActions) refreshSessionActions();
         if (enhancementSettings.timeline) renderTimeline();
       }, 1500);
@@ -1858,7 +1828,6 @@
 
   async function bootCodexPilot() {
     await loadEnhancementSettings();
-    await loadPluginPatchStatus();
     if (!enhancementSettings.enabled) {
       reportRendererEvent("enhancement_disabled", {});
       return;
@@ -1874,8 +1843,7 @@
     }
     reportRendererEvent("loaded", {
       helper_port: helperPort,
-      enhancement_settings: enhancementSettings,
-      plugin_patch_status: pluginPatchStatus
+      enhancement_settings: enhancementSettings
     });
   }
 

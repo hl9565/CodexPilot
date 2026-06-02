@@ -154,6 +154,8 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     timeline: true,
     inlineActions: true,
     scrollRestore: true,
+    pluginEntryUnlock: true,
+    forcePluginInstall: true,
   }),
   save_enhancement_settings: () => "预览模式：页面增强设置已保存，重新注入后生效。",
   save_provider_profile: () => ({

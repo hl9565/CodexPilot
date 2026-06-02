@@ -24,6 +24,10 @@ pub(crate) struct EnhancementSettings {
     pub(crate) inline_actions: bool,
     #[serde(default = "default_true")]
     pub(crate) scroll_restore: bool,
+    #[serde(default = "default_true")]
+    pub(crate) plugin_entry_unlock: bool,
+    #[serde(default = "default_true")]
+    pub(crate) force_plugin_install: bool,
 }
 
 impl Default for EnhancementSettings {
@@ -33,6 +37,8 @@ impl Default for EnhancementSettings {
             timeline: true,
             inline_actions: true,
             scroll_restore: true,
+            plugin_entry_unlock: true,
+            force_plugin_install: true,
         }
     }
 }

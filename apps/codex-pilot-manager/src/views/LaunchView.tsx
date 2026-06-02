@@ -29,6 +29,8 @@ export function LaunchView({
     timeline: true,
     inlineActions: true,
     scrollRestore: true,
+    pluginEntryUnlock: true,
+    forcePluginInstall: true,
   });
   const [saveMessage, setSaveMessage] = React.useState("");
   const [enhancementMessage, setEnhancementMessage] = React.useState("");
@@ -238,6 +240,20 @@ export function LaunchView({
               disabled={!enhancementSettings.enabled || enhancementSaving}
               label="滚动恢复"
               onChange={(checked) => updateEnhancementSettings({ scrollRestore: checked })}
+            />
+            <SwitchRow
+              checked={enhancementSettings.pluginEntryUnlock}
+              description="未登录 ChatGPT（API Key 模式）时解锁原生插件入口，免登录使用插件。"
+              disabled={!enhancementSettings.enabled || enhancementSaving}
+              label="插件入口解锁"
+              onChange={(checked) => updateEnhancementSettings({ pluginEntryUnlock: checked })}
+            />
+            <SwitchRow
+              checked={enhancementSettings.forcePluginInstall}
+              description="解除 App unavailable / 应用不可用导致的插件安装按钮禁用。"
+              disabled={!enhancementSettings.enabled || enhancementSaving}
+              label="特殊插件强制安装"
+              onChange={(checked) => updateEnhancementSettings({ forcePluginInstall: checked })}
             />
           </div>
         </div>

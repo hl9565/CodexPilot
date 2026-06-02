@@ -123,7 +123,9 @@ fn enhancement_settings() -> Value {
             "enabled": parsed.get("enabled").and_then(Value::as_bool).unwrap_or(true),
             "timeline": parsed.get("timeline").and_then(Value::as_bool).unwrap_or(true),
             "inlineActions": parsed.get("inlineActions").and_then(Value::as_bool).unwrap_or(true),
-            "scrollRestore": parsed.get("scrollRestore").and_then(Value::as_bool).unwrap_or(true)
+            "scrollRestore": parsed.get("scrollRestore").and_then(Value::as_bool).unwrap_or(true),
+            "pluginEntryUnlock": parsed.get("pluginEntryUnlock").and_then(Value::as_bool).unwrap_or(true),
+            "forcePluginInstall": parsed.get("forcePluginInstall").and_then(Value::as_bool).unwrap_or(true)
         }
     })
 }

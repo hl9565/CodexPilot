@@ -205,6 +205,8 @@ export type EnhancementSettings = {
   timeline: boolean;
   inlineActions: boolean;
   scrollRestore: boolean;
+  pluginEntryUnlock: boolean;
+  forcePluginInstall: boolean;
 };
 
 export type ViewId = "overview" | "launch" | "provider" | "sessions" | "diagnostics";
