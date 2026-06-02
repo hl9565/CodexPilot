@@ -82,9 +82,9 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     ],
   }),
   provider_sync_snapshot: () => ({
-    targetProvider: "CodexPilot",
+    targetProvider: "acme-relay",
     currentProvider: "acme-relay",
-    availableProviders: ["CodexPilot", "acme-relay", "openai"],
+    availableProviders: ["acme-relay", "openai"],
     rolloutFiles: 42,
     rolloutRewriteNeeded: 18,
     sqliteRows: 44,
@@ -92,12 +92,12 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     sqliteTotalUpdatesNeeded: 21,
     rolloutProviders: [
       { provider: "openai", count: 18 },
-      { provider: "CodexPilot", count: 16 },
+      { provider: "acme-relay", count: 16 },
       { provider: "acme-relay", count: 8 },
     ],
     sqliteProviders: [
       { provider: "openai", count: 19 },
-      { provider: "CodexPilot", count: 17 },
+      { provider: "acme-relay", count: 17 },
       { provider: "acme-relay", count: 8 },
     ],
   }),
@@ -115,7 +115,7 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     forcePluginInstall: true,
   }),
   save_enhancement_settings: () => "预览模式：页面增强设置已保存，重新注入后生效。",
-  sync_provider_sessions: () => "预览模式：Provider Sync 完成，目标 CodexPilot，会话文件 18 个，数据库行 19 条。",
+  sync_provider_sessions: () => "预览模式：Provider Sync 完成，目标 acme-relay，会话文件 18 个，数据库行 19 条。",
   restore_recycle_bin_entries: () => ({
     message: "预览模式：已恢复所选会话",
     succeededTokens: ["preview-token-restore"],

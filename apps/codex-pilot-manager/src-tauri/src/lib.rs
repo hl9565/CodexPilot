@@ -2,11 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 mod commands;
 mod launch_settings;
-mod provider_store;
-mod provider_store_rules;
-mod provider_store_types;
 pub(crate) use launch_settings::*;
-pub(crate) use provider_store::*;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -166,18 +162,8 @@ pub fn run() {
             commands::app::save_launch_preferences,
             commands::app::enhancement_settings_snapshot,
             commands::app::save_enhancement_settings,
-            commands::provider::provider_snapshot,
-            commands::provider::ccs_provider_snapshot,
-            commands::provider::import_ccs_provider_profiles,
-            commands::provider::import_official_snapshot_from_backup,
-            commands::provider::prepare_official_snapshot_after_clearing_relay,
-            commands::provider::apply_provider,
-            commands::provider::save_provider_profile,
-            commands::provider::activate_provider_profile,
-            commands::provider::delete_provider_profile,
-            commands::provider::clear_provider,
-            commands::provider::provider_sync_snapshot,
-            commands::provider::sync_provider_sessions,
+            commands::session_sync::provider_sync_snapshot,
+            commands::session_sync::sync_provider_sessions,
             commands::sessions::recycle_bin_snapshot,
             commands::sessions::restore_recycle_bin_entries,
             commands::sessions::delete_recycle_bin_entries,
@@ -231,7 +217,6 @@ fn format_provider_counts(counts: &[codex_pilot_data::provider_sync::ProviderCou
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider_store_types::default_upstream_protocol;
 
     #[test]
     fn launch_preferences_round_trip() {
@@ -331,75 +316,12 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn provider_profiles_round_trip_and_active_selection() {
-        let root = unique_temp_dir("provider-profiles");
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("provider-profiles.json");
-        let state = ProviderProfilesState {
-            active_profile_id: "p2".to_string(),
-            official_config_snapshot: Some(OfficialConfigSnapshot {
-                config_toml: "model_provider = \"openai\"\n".to_string(),
-                captured_at_ms: 1770000000000,
-            }),
-            profiles: vec![
-                ProviderProfile {
-                    id: "p1".to_string(),
-                    name: "配置一".to_string(),
-                    base_url: "https://one.example/v1".to_string(),
-                    bearer_token: "sk-one".to_string(),
-                    mode: ProviderProfileMode::HybridApi,
-                    upstream_protocol: default_upstream_protocol(),
-                    authenticated_behavior: default_authenticated_behavior(),
-                },
-                ProviderProfile {
-                    id: "p2".to_string(),
-                    name: "配置二".to_string(),
-                    base_url: "https://two.example/v1".to_string(),
-                    bearer_token: "sk-two".to_string(),
-                    mode: ProviderProfileMode::Api,
-                    upstream_protocol: default_upstream_protocol(),
-                    authenticated_behavior: AuthenticatedBehavior::OfficialDirect,
-                },
-            ],
-        };
-
-        save_provider_profiles_to_path(&path, &state).unwrap();
-        let loaded = load_provider_profiles_from_path(&path).unwrap();
-        assert_eq!(loaded.active_profile_id, "p2");
-        assert_eq!(loaded.profiles.len(), 2);
-        assert_eq!(
-            loaded
-                .official_config_snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.config_toml.as_str()),
-            Some("model_provider = \"openai\"\n")
-        );
-        assert_eq!(
-            loaded.profiles[0].authenticated_behavior,
-            AuthenticatedBehavior::Relay
-        );
-        assert_eq!(
-            loaded.profiles[1].authenticated_behavior,
-            AuthenticatedBehavior::OfficialDirect
-        );
-        assert_eq!(
-            profile_by_id(&loaded, None).unwrap().base_url,
-            "https://two.example/v1"
-        );
-        assert_eq!(
-            profile_by_id(&loaded, Some("p1")).unwrap().bearer_token,
-            "sk-one"
-        );
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
     fn unique_temp_dir(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("codex-pilot-manager-{name}-{}", now_nanos()))
     }
 }
 
+#[cfg(test)]
 fn now_nanos() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

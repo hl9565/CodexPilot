@@ -95,20 +95,6 @@ pub(crate) async fn diagnostics_snapshot(
                     .to_string(),
                     detail: "使用 codex-pilot-core 的应用路径探测逻辑。".to_string(),
                 },
-                DiagnosticCheck {
-                    name: "中转设置".to_string(),
-                    status: if codex_pilot_core::relay_config::default_relay_provider_config()
-                        .configured
-                    {
-                        "ok"
-                    } else {
-                        "missing"
-                    }
-                    .to_string(),
-                    detail: codex_pilot_core::app_paths::codex_config_path()
-                        .to_string_lossy()
-                        .to_string(),
-                },
                 provider_sync_check,
             ],
             logs: codex_pilot_core::diagnostic_log::read_tail(80).unwrap_or_default(),
@@ -134,7 +120,6 @@ fn append_diagnostic_snapshot(state: &tauri::State<'_, ManagerState>) -> Result<
     let options = launch_options_from_preferences(&prefs);
     let app_dir = codex_pilot_core::app_paths::resolve_codex_app_dir(options.app_dir.as_deref());
     let launcher = resolve_launcher_path();
-    let provider = codex_pilot_core::relay_config::default_relay_provider_config();
     let status_path = codex_pilot_core::status::status_path();
     let config_path = codex_pilot_core::app_paths::codex_config_path();
     let auth_path = codex_pilot_core::app_paths::codex_auth_path();
@@ -161,16 +146,6 @@ fn append_diagnostic_snapshot(state: &tauri::State<'_, ManagerState>) -> Result<
         }),
     )?;
     append_diagnostic_event(
-        "diagnostics.provider",
-        json!({
-            "active_provider": if provider.active { provider.provider } else { "chatgpt".to_string() },
-            "configured": provider.configured,
-            "authenticated": provider.authenticated,
-            "config_path": provider.config_path,
-            "account_present": provider.account_label.is_some()
-        }),
-    )?;
-    append_diagnostic_event(
         "diagnostics.files",
         json!({
             "status_path": status_path.to_string_lossy(),
@@ -181,8 +156,6 @@ fn append_diagnostic_snapshot(state: &tauri::State<'_, ManagerState>) -> Result<
             "auth_exists": auth_path.exists(),
             "state_db_path": state_db_path.to_string_lossy(),
             "state_db_exists": state_db_path.exists(),
-            "provider_profiles_path": provider_profiles_path().to_string_lossy(),
-            "provider_profiles_exists": provider_profiles_path().exists()
         }),
     )
 }
@@ -196,10 +169,7 @@ pub(crate) fn append_diagnostic_event(
 }
 
 fn provider_sync_diagnostic_check() -> DiagnosticCheck {
-    match codex_pilot_data::provider_sync::inspect_provider_sync_with_target(
-        None,
-        Some("CodexPilot"),
-    ) {
+    match codex_pilot_data::provider_sync::inspect_provider_sync(None) {
         Ok(inspection) => {
             let pending =
                 inspection.rollout_rewrite_needed + inspection.sqlite_provider_rows_needing_sync;

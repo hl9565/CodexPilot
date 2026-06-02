@@ -60,17 +60,9 @@ pub(crate) async fn auto_sync_sessions_after_launch(
         return success_message.to_string();
     }
 
-    let target_provider = current_effective_sync_target();
-    let inspection_result = tauri::async_runtime::spawn_blocking({
-        let target_provider = target_provider.clone();
-        move || {
-            codex_pilot_data::provider_sync::inspect_provider_sync_with_target(
-                None,
-                Some(&target_provider),
-            )
-        }
-    })
-    .await;
+    let inspection_result =
+        tauri::async_runtime::spawn_blocking(|| codex_pilot_data::provider_sync::inspect_provider_sync(None))
+            .await;
 
     let inspection = match inspection_result {
         Ok(Ok(value)) => value,
@@ -80,7 +72,6 @@ pub(crate) async fn auto_sync_sessions_after_launch(
                 "manager.auto_session_sync_failed",
                 json!({
                     "launch_action": launch_action,
-                    "target_provider": target_provider,
                     "stage": "inspect",
                     "message": message
                 }),
@@ -93,7 +84,6 @@ pub(crate) async fn auto_sync_sessions_after_launch(
                 "manager.auto_session_sync_failed",
                 json!({
                     "launch_action": launch_action,
-                    "target_provider": target_provider,
                     "stage": "inspect_join",
                     "message": message
                 }),
@@ -119,16 +109,9 @@ pub(crate) async fn auto_sync_sessions_after_launch(
         };
     }
 
-    let sync_result = tauri::async_runtime::spawn_blocking({
-        let target_provider = inspection.target_provider.clone();
-        move || {
-            codex_pilot_data::provider_sync::run_provider_sync_with_target(
-                None,
-                Some(&target_provider),
-            )
-        }
-    })
-    .await;
+    let sync_result =
+        tauri::async_runtime::spawn_blocking(|| codex_pilot_data::provider_sync::run_provider_sync(None))
+            .await;
 
     let sync_result = match sync_result {
         Ok(value) => value,
@@ -167,15 +150,6 @@ pub(crate) async fn auto_sync_sessions_after_launch(
     match launch_action {
         "reinject" => "已重新注入 CodexPilot，并完成会话同步。".to_string(),
         _ => "已启动 CodexPilot，并完成会话同步。".to_string(),
-    }
-}
-
-fn current_effective_sync_target() -> String {
-    let provider = codex_pilot_core::relay_config::default_relay_provider_config();
-    if provider.active {
-        provider.provider
-    } else {
-        "openai".to_string()
     }
 }
 

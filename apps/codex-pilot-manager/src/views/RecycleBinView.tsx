@@ -33,7 +33,7 @@ export function RecycleBinView({
   const [zipImportMode, setZipImportMode] = React.useState<SessionZipImportMode | "">("");
   const [zipOverwriteConfirm, setZipOverwriteConfirm] = React.useState(false);
   const [syncSnapshot, setSyncSnapshot] = React.useState<ProviderSyncSnapshot | null>(null);
-  const [syncTarget, setSyncTarget] = React.useState("CodexPilot");
+  const [syncTarget, setSyncTarget] = React.useState("");
   const [customSyncTarget, setCustomSyncTarget] = React.useState("");
   const [syncInspecting, setSyncInspecting] = React.useState(false);
   const [syncBusy, setSyncBusy] = React.useState(false);
@@ -44,15 +44,15 @@ export function RecycleBinView({
   const allSelected = entries.length > 0 && selected.length === entries.length;
   const selectedSyncTarget = syncTarget === "__custom" ? customSyncTarget.trim() : syncTarget;
 
-  const refreshProviderSync = React.useCallback((target = "CodexPilot") => {
-    return callBackend<ProviderSyncSnapshot>("provider_sync_snapshot", {
-      request: { targetProvider: target || "CodexPilot" },
-    })
+  const refreshProviderSync = React.useCallback((target?: string) => {
+    const trimmedTarget = target?.trim();
+    const args = trimmedTarget ? { request: { targetProvider: trimmedTarget } } : undefined;
+    return callBackend<ProviderSyncSnapshot>("provider_sync_snapshot", args)
       .then((snapshot) => {
         setSyncSnapshot(snapshot);
         setSyncConfirming(false);
         if (syncTarget !== "__custom") {
-          setSyncTarget(snapshot.targetProvider || "CodexPilot");
+          setSyncTarget(snapshot.targetProvider);
         }
         return snapshot;
       });
@@ -67,7 +67,7 @@ export function RecycleBinView({
   }, [selected.length, entries]);
 
   React.useEffect(() => {
-    refreshProviderSync("CodexPilot")
+    refreshProviderSync()
       .catch((error) => onMessage(`检查对话同步失败：${String(error)}`));
   }, []);
 
@@ -221,33 +221,36 @@ export function RecycleBinView({
 
   const inspectProviderSync = () => {
     if (syncInspecting) return;
-    const target = selectedSyncTarget || "CodexPilot";
+    const target = selectedSyncTarget;
+    const label = target || syncSnapshot?.currentProvider || "当前配置";
     setSyncInspecting(true);
-    onMessage(`正在检查对话同步：${target}`);
-    refreshProviderSync(target)
+    onMessage(`正在检查对话同步：${label}`);
+    refreshProviderSync(target || undefined)
       .then((snapshot) => onMessage(`检查完成：${providerSyncSummary(snapshot)}`))
       .catch((error) => onMessage(`检查对话同步失败：${String(error)}`))
       .finally(() => setSyncInspecting(false));
   };
 
   const runProviderSync = () => {
-    const target = selectedSyncTarget || "CodexPilot";
+    const target = selectedSyncTarget;
+    const label = target || syncSnapshot?.currentProvider || "当前配置";
     const pending = syncSnapshot
       ? syncSnapshot.rolloutRewriteNeeded + syncSnapshot.sqliteProviderRowsNeedingSync
       : 0;
     if (!syncConfirming) {
       setSyncConfirming(true);
-      onMessage(`请再次确认同步：目标 ${target}，预计影响 ${pending} 项。`);
+      onMessage(`请再次确认同步：目标 ${label}，预计影响 ${pending} 项。`);
       return;
     }
     setSyncBusy(true);
     setSyncConfirming(false);
     onProgress("正在同步对话");
-    onMessage(`正在同步对话：${target}`);
-    callBackend<string>("sync_provider_sessions", { request: { targetProvider: target } })
+    onMessage(`正在同步对话：${label}`);
+    const args = target ? { request: { targetProvider: target } } : undefined;
+    callBackend<string>("sync_provider_sessions", args)
       .then((message) => {
         onMessage(message);
-        refreshProviderSync(target);
+        refreshProviderSync(target || undefined);
         onRefresh();
       })
       .catch((error) => onMessage(`同步对话失败：${String(error)}`))
@@ -257,7 +260,7 @@ export function RecycleBinView({
       });
   };
 
-  const providerOptions = syncSnapshot?.availableProviders ?? ["CodexPilot"];
+  const providerOptions = syncSnapshot?.availableProviders ?? [];
   const customTargetSelected = syncTarget === "__custom";
   const syncPending = syncSnapshot
     ? syncSnapshot.rolloutRewriteNeeded + syncSnapshot.sqliteProviderRowsNeedingSync
@@ -567,7 +570,7 @@ export function RecycleBinView({
                   className="secondary"
                   onClick={() => {
                     setCustomSyncTarget("");
-                    setSyncTarget(syncSnapshot?.currentProvider ?? providerOptions[0] ?? "CodexPilot");
+                    setSyncTarget(syncSnapshot?.currentProvider ?? providerOptions[0] ?? "");
                   }}
                   type="button"
                 >
@@ -577,6 +580,7 @@ export function RecycleBinView({
             ) : (
               <div className="syncFieldRow">
                 <select value={syncTarget} onChange={(event) => setSyncTarget(event.target.value)}>
+                  {!syncTarget && <option value="">当前配置</option>}
                   {providerOptions.map((provider) => (
                     <option key={provider} value={provider}>{provider}</option>
                   ))}
@@ -601,7 +605,7 @@ export function RecycleBinView({
             {syncAction}
           </div>
           <dl>
-            <Metric label="目标归属" value={selectedSyncTarget || "CodexPilot"} />
+            <Metric label="目标归属" value={selectedSyncTarget || syncSnapshot?.targetProvider || "-"} />
             <Metric label="当前配置" value={syncSnapshot?.currentProvider ?? "-"} />
           </dl>
         </div>
