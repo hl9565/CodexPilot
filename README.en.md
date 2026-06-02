@@ -20,7 +20,7 @@
   <a href="Cargo.toml"><img alt="Rust workspace" src="https://img.shields.io/badge/Rust-workspace-b7410e" /></a>
 </p>
 
-CodexPilot is for people who already use Codex App locally. It provides a local manager and connects to running Codex pages through Chromium DevTools Protocol. Use it to launch Codex, export sessions, manage the recycle bin, sync Provider ownership, and inspect diagnostics, without modifying Codex App's installed files or replacing the app.
+CodexPilot is for people who already use Codex App locally. It provides a local manager and connects to running Codex pages through Chromium DevTools Protocol. Use it to launch Codex, export sessions, manage the recycle bin, run dialog sync, and inspect diagnostics, without modifying Codex App's installed files or replacing the app.
 
 > CodexPilot is unofficial and is not affiliated with OpenAI or Codex App.
 
@@ -33,7 +33,7 @@ CodexPilot is for people who already use Codex App locally. It provides a local 
    - macOS Apple Silicon: if the release provides `CodexPilot-*-macos-arm64.dmg`, open it and drag `CodexPilot.app` into Applications.
 2. Open the CodexPilot manager, go to Launch, confirm the Codex path, and click Launch.
 3. After Codex opens, use the CodexPilot menu to export the current session.
-4. To maintain historical sessions, use Dialog Maintenance for recycle bin cleanup or Provider ownership sync.
+4. To maintain historical sessions, use Dialog Maintenance for recycle bin cleanup or to run Dialog Sync.
 
 Current macOS packages are not signed with an Apple Developer ID and are not notarized. If macOS cannot verify the app, read the note inside the DMG before using the bundled helper script.
 
@@ -41,7 +41,7 @@ macOS Intel builds are not currently published as verified release assets. If yo
 
 ## Highlights
 
-### Provider Ownership Sync
+### Dialog Sync
 
 After ccSwitch or another tool changes `model_provider` in `~/.codex/config.toml`, historical sessions may disappear or group incorrectly because their Provider metadata no longer matches. CodexPilot does not rewrite historical data automatically; in Dialog Maintenance, you can preview the impact first, then manually sync session ownership to the current config provider or a manually entered Provider.
 
@@ -68,7 +68,7 @@ See the [feature guide](docs/features.en.md#local-data-and-security) for the ful
 
 ## Docs
 
-- [Feature guide](docs/features.en.md): launch, dialog maintenance, Provider sync, diagnostics, and local data.
+- [Feature guide](docs/features.en.md): launch, dialog maintenance, dialog sync, diagnostics, and local data.
 - [README guidelines](docs/development/readme-guidelines.md): homepage information architecture and copy rules, currently in Chinese.
 
 ## Support

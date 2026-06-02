@@ -189,7 +189,7 @@ export function LaunchView({
                 <span>启动后自动同步会话</span>
               </label>
               <p className="formHint">
-                启动或注入成功后，按当前生效通道目标自动检查并同步历史会话归属。
+                启动或注入成功后，按当前配置的 Provider 自动检查并同步历史会话归属。
               </p>
             </div>
             <div className="buttonRow compactButtonRow">
@@ -209,7 +209,7 @@ export function LaunchView({
           </div>
         </div>
         <p className="formHint enhancementIntro">
-          控制注入到 Codex 页面里的可见增强。关闭后不会影响模型通道、对话维护和诊断。
+          控制注入到 Codex 页面里的可见增强。关闭后不会影响对话维护、对话同步和诊断。
         </p>
         <div className="enhancementList">
           <SwitchRow

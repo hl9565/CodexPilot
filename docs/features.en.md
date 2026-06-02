@@ -7,7 +7,7 @@ This guide explains what each CodexPilot page does, which local data it reads or
 - [Launch And Injection](#launch-and-injection)
 - [Session Export And Maintenance](#session-export-and-maintenance)
 - [Timeline](#timeline)
-- [Provider Ownership Sync](#provider-ownership-sync)
+- [Dialog Sync](#dialog-sync)
 - [Diagnostics](#diagnostics)
 - [Local Data And Security](#local-data-and-security)
 - [Compatibility](#compatibility)
@@ -40,9 +40,9 @@ In the current Codex conversation, when CodexPilot detects at least two user pro
 
 Timeline only reads the current page content. It does not write session files, state databases, or configuration files. If the current page is not a conversation, the session cannot be detected, or there are not enough user prompts, Timeline hides itself automatically.
 
-## Provider Ownership Sync
+## Dialog Sync
 
-After ccSwitch or another tool changes `model_provider` in `~/.codex/config.toml`, old sessions may be hidden or grouped incorrectly because their `model_provider` metadata differs. CodexPilot no longer rewrites historical session ownership automatically. To make historical sessions visible or grouped under the current config Provider, open Dialog Maintenance, use Dialog Ownership Sync, preview the impact, then sync. For special migrations, you can still enter a manual target Provider.
+After ccSwitch or another tool changes `model_provider` in `~/.codex/config.toml`, old sessions may be hidden or grouped incorrectly because their `model_provider` metadata differs. CodexPilot no longer rewrites historical session ownership automatically. To make historical sessions visible or grouped under the current config Provider, open Dialog Maintenance, use Dialog Sync, preview the impact, then sync. For special migrations, you can still enter a manual target Provider.
 
 If you are only switching Providers temporarily, or if the previewed impact is unclear, do not sync yet. Use this only when historical sessions are missing or grouped incorrectly and you are sure you want those records assigned to the target Provider.
 
@@ -70,17 +70,17 @@ Diagnostics are mainly used to check:
 - whether the Codex app path is usable;
 - whether the debug port and helper port are healthy;
 - whether the page has connected and injection has completed;
-- whether local data required by dialog maintenance and Provider sync is accessible.
+- whether local data required by dialog maintenance and dialog sync is accessible.
 
 ## Local Data And Security
 
 CodexPilot reads or writes these local paths:
 
-- `~/.codex/config.toml`: read-only current `model_provider` source for Provider Sync defaults.
+- `~/.codex/config.toml`: read-only current `model_provider` source for dialog sync defaults.
 - `~/.codex/sessions/`: session metadata and export sources.
 - `~/.codex/archived_sessions/`: archived session metadata and export sources.
-- `~/.codex/state_5.sqlite`: session index, delete, restore, and provider sync.
-- `~/.codex/backups_state/provider-sync/`: Provider Sync backups.
+- `~/.codex/state_5.sqlite`: session index, delete, restore, and dialog sync.
+- `~/.codex/backups_state/provider-sync/`: dialog sync backups.
 - CodexPilot's own app state directory: launch preferences, page enhancement settings, and diagnostic logs.
 
 Use CodexPilot only on trusted devices, and avoid uploading local config, logs, screenshots, or backup directories to public repositories. Model Provider switching and API key management should be handled by ccSwitch or your own Codex configuration flow.
