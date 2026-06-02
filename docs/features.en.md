@@ -18,7 +18,23 @@ CodexPilot starts Codex through a local launcher and connects to the renderer th
 
 If Codex is already running through another path, the manager will suggest re-injection or restart based on the current state. Restarting asks for confirmation first so unsaved input is not closed unexpectedly.
 
-![CodexPilot launch page](images/readme-launch.png)
+The Launch page also includes Page Enhancement switches for visible injected features:
+
+- Timeline
+- Inline export and delete actions
+- Scroll restore
+- Plugin Entry Unlock
+- Force Plugin Install
+
+`Plugin Entry Unlock` is meant for API-key usage without ChatGPT login. When enabled, CodexPilot unlocks the native plugin entry in the current Codex page. `Force Plugin Install` re-enables certain install buttons that were disabled by `App unavailable`.
+
+These enhancements only affect the injected page behavior for the current running Codex instance. They do not replace ccSwitch, and they do not manage Provider switching or API keys in `~/.codex/config.toml`.
+
+![CodexPilot page enhancements and plugin unlock](images/readme-launch.png)
+
+When plugin entry unlock is active, the native Codex sidebar shows `Plugins - Unlocked`.
+
+![CodexPilot unlocked plugin sidebar snippet](images/readme-plugin-unlocked-snippet.png)
 
 ## Session Export And Maintenance
 
@@ -83,7 +99,7 @@ CodexPilot reads or writes these local paths:
 - `~/.codex/backups_state/provider-sync/`: dialog sync backups.
 - CodexPilot's own app state directory: launch preferences, page enhancement settings, and diagnostic logs.
 
-Use CodexPilot only on trusted devices, and avoid uploading local config, logs, screenshots, or backup directories to public repositories. Model Provider switching and API key management should be handled by ccSwitch or your own Codex configuration flow.
+Use CodexPilot only on trusted devices, and avoid uploading local config, logs, screenshots, or backup directories to public repositories. Model Provider switching and API key management should be handled by ccSwitch or your own Codex configuration flow; CodexPilot only reads the current `model_provider` as the default target for dialog sync.
 
 CodexPilot also uses a local loopback debug port and a local helper port. Chromium DevTools Protocol connections can execute page scripts, so use CodexPilot only in a trusted local environment.
 

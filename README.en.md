@@ -20,7 +20,7 @@
   <a href="Cargo.toml"><img alt="Rust workspace" src="https://img.shields.io/badge/Rust-workspace-b7410e" /></a>
 </p>
 
-CodexPilot is for people who already use Codex App locally. It provides a local manager and connects to running Codex pages through Chromium DevTools Protocol. Use it to launch Codex, export sessions, manage the recycle bin, run dialog sync, and inspect diagnostics, without modifying Codex App's installed files or replacing the app.
+CodexPilot is for people who already use Codex App locally. It provides a local manager and connects to running Codex pages through Chromium DevTools Protocol. Use it to launch Codex, unlock plugin entry, export sessions, manage the recycle bin, run dialog sync, and inspect diagnostics, without modifying Codex App's installed files or replacing the app.
 
 > CodexPilot is unofficial and is not affiliated with OpenAI or Codex App.
 
@@ -41,6 +41,18 @@ macOS Intel builds are not currently published as verified release assets. If yo
 
 ## Highlights
 
+### Plugin Unlock Without Login
+
+The Launch page includes `Plugin Entry Unlock` and `Force Plugin Install` under Page Enhancements. When you use API-key mode without ChatGPT login, CodexPilot can unlock the native plugin entry inside Codex and re-enable install buttons that were disabled by `App unavailable`.
+
+This only changes the current running Codex page. It does not take over Provider switching, and it does not require a CodexPilot-managed Provider flow in `~/.codex/config.toml`.
+
+![CodexPilot page enhancements and plugin unlock](docs/images/readme-launch.png)
+
+After unlock succeeds, the native Codex sidebar shows `Plugins - Unlocked` directly.
+
+![CodexPilot unlocked plugin sidebar snippet](docs/images/readme-plugin-unlocked-snippet.png)
+
 ### Dialog Sync
 
 After ccSwitch or another tool changes `model_provider` in `~/.codex/config.toml`, historical sessions may disappear or group incorrectly because their Provider metadata no longer matches. CodexPilot does not rewrite historical data automatically; in Dialog Maintenance, you can preview the impact first, then manually sync session ownership to the current config provider or a manually entered Provider.
@@ -49,7 +61,8 @@ After ccSwitch or another tool changes `model_provider` in `~/.codex/config.toml
 
 ## Other Features
 
-- Launch and injection
+- Launch
+- Page enhancement switches
 - Session export
 - Timeline
 - Dialog maintenance

@@ -56,7 +56,7 @@ CodexPilot 的定位应突出本地控制和可解释操作：
 
 - 本地启动。
 - 对话维护。
-- 模型通道管理。
+- 页面增强与插件入口解锁。
 - Provider 归属同步。
 - 诊断。
 - 不修改 Codex App 安装目录。
@@ -69,7 +69,7 @@ CodexPilot 的定位应突出本地控制和可解释操作：
 
 补充说明可以写：
 
-> CodexPilot 提供一个本地管理界面，用 Chromium DevTools Protocol 连接正在运行的 Codex 页面。你可以从这里启动 Codex、导出会话、处理回收站、同步 Provider 归属、配置混合中转和查看诊断日志；它不修改 Codex App 安装目录，也不替换 Codex 本身。
+> CodexPilot 提供一个本地管理界面，用 Chromium DevTools Protocol 连接正在运行的 Codex 页面。你可以从这里启动 Codex、解锁插件入口、导出会话、处理回收站、同步 Provider 归属和查看诊断日志；它不修改 Codex App 安装目录，也不替换 Codex 本身。
 
 ## README 与功能文档分工
 
@@ -77,7 +77,7 @@ README 保留首页级内容：
 
 - 项目定位。
 - 快速使用。
-- 核心亮点。当前重点是混合中转和 Provider 归属同步，要比普通功能讲得更具体。
+- 核心亮点。当前重点是页面增强/插件入口解锁和 Provider 归属同步，要比普通功能讲得更具体。
 - 其他功能只保留名称列表，避免抢核心亮点的阅读重心。
 - 本地数据与安全摘要。
 - 文档链接。

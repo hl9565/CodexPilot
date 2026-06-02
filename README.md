@@ -23,7 +23,7 @@
   <a href="Cargo.toml"><img alt="Rust workspace" src="https://img.shields.io/badge/Rust-workspace-b7410e" /></a>
 </p>
 
-CodexPilot 适合已经在本机使用 Codex App 的用户。它提供一个本地管理界面，用 Chromium DevTools Protocol 连接正在运行的 Codex 页面。你可以从这里启动 Codex、导出会话、处理回收站、执行对话同步和查看诊断日志；它不修改 Codex App 安装目录，也不替换 Codex 本身。
+CodexPilot 适合已经在本机使用 Codex App 的用户。它提供一个本地管理界面，用 Chromium DevTools Protocol 连接正在运行的 Codex 页面。你可以从这里启动 Codex、解锁插件入口、导出会话、处理回收站、执行对话同步和查看诊断日志；它不修改 Codex App 安装目录，也不替换 Codex 本身。
 
 > CodexPilot 是非官方工具，不隶属于 OpenAI 或 Codex App。
 
@@ -42,6 +42,18 @@ macOS 当前包未做 Apple Developer ID 签名和公证。如果系统提示无
 
 ## 核心亮点
 
+### 免登录插件解锁
+
+启动页的“页面增强”里提供“插件入口解锁”和“特殊插件强制安装”开关。未登录 ChatGPT、只使用 API Key 模式时，CodexPilot 可以解锁 Codex 原生插件入口，并解除部分插件因 `App unavailable` / `应用不可用` 导致的安装按钮禁用。
+
+这个能力只作用于当前运行中的 Codex 页面，不接管 Provider 切换，也不要求你把 `~/.codex/config.toml` 改成 CodexPilot 自己的配置流。
+
+![CodexPilot 页面增强与插件解锁](docs/images/readme-launch.png)
+
+解锁成功后，Codex 原生侧栏会直接显示“插件 - 已解锁”。
+
+![CodexPilot 插件已解锁侧栏效果](docs/images/readme-plugin-unlocked-snippet.png)
+
 ### 对话同步
 
 当 ccSwitch 或其他工具切换 `~/.codex/config.toml` 里的 `model_provider` 后，历史会话可能因为 Provider 元数据不一致而不可见或分组异常。CodexPilot 不会自动改写历史数据；你可以在“对话维护”里先预览影响范围，再手动把会话归属同步到当前配置或手动指定的 Provider。
@@ -50,7 +62,8 @@ macOS 当前包未做 Apple Developer ID 签名和公证。如果系统提示无
 
 ## 其他功能
 
-- 启动与注入
+- 启动
+- 页面增强开关
 - 会话导出
 - Timeline
 - 对话维护

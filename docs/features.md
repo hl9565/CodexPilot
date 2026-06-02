@@ -18,7 +18,23 @@ CodexPilot 使用本地 launcher 启动 Codex，并通过 Chromium DevTools Prot
 
 如果 Codex 已经由其他方式启动，管理器会根据当前状态提示重新注入或重启。重启 Codex 前会要求确认，避免未保存输入意外丢失。
 
-![CodexPilot 启动页面](images/readme-launch.png)
+启动页还提供一组“页面增强”开关，用来控制注入到 Codex 页面的可见能力：
+
+- Timeline。
+- 行内导出和删除。
+- 滚动恢复。
+- 插件入口解锁。
+- 特殊插件强制安装。
+
+其中“插件入口解锁”适合未登录 ChatGPT、只使用 API Key 模式的场景。打开后，CodexPilot 会在当前页面里解锁原生插件入口。“特殊插件强制安装”则会解除部分插件因 `App unavailable` / `应用不可用` 导致的安装按钮禁用。
+
+这些增强只作用于当前页面注入效果，不会替代 ccSwitch，也不会接管 `~/.codex/config.toml` 的 Provider 切换或 API Key 管理。
+
+![CodexPilot 页面增强与插件解锁](images/readme-launch.png)
+
+如果插件入口解锁生效，Codex 原生侧栏会显示“插件 - 已解锁”。
+
+![CodexPilot 插件已解锁侧栏效果](images/readme-plugin-unlocked-snippet.png)
 
 ## 会话导出与维护
 
@@ -83,7 +99,7 @@ CodexPilot 会读取或写入以下本机位置：
 - `~/.codex/backups_state/provider-sync/`：对话同步备份。
 - CodexPilot 自己的应用状态目录：启动偏好、页面增强设置、诊断日志。
 
-请只在可信设备上使用，并避免把本地配置、日志、截图或备份目录上传到公开仓库。模型 Provider 切换和 API Key 管理请交给 ccSwitch 或你自己的 Codex 配置流程。
+请只在可信设备上使用，并避免把本地配置、日志、截图或备份目录上传到公开仓库。模型 Provider 切换和 API Key 管理请交给 ccSwitch 或你自己的 Codex 配置流程；CodexPilot 只读取当前 `model_provider` 作为对话同步默认目标。
 
 CodexPilot 还会使用本机 loopback 调试端口和本地 helper 端口。Chromium DevTools Protocol 连接具备页面脚本执行能力，请只在可信本机环境使用。
 
