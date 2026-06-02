@@ -1043,24 +1043,6 @@
     if (!unarchiveButton) return;
     row.dataset.codexPilotArchiveRow = "true";
 
-    const exportButton = document.createElement("button");
-    exportButton.type = "button";
-    exportButton.className = archiveActionClass;
-    setIconButtonContent(
-      exportButton,
-      "导出 Markdown",
-      '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>'
-    );
-    installRowActionEvents(exportButton, async (event) => {
-      stopRowActionEvent(event);
-      const session = await resolveArchiveSession(row);
-      if (!session.session_id) {
-        showToast("导出失败：未找到归档会话 ID", null);
-        return;
-      }
-      await exportSession(session);
-    });
-
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = archiveActionClass;
@@ -1081,7 +1063,6 @@
     });
 
     unarchiveButton.insertAdjacentElement("afterend", deleteButton);
-    unarchiveButton.insertAdjacentElement("afterend", exportButton);
   }
 
   function installArchiveDeleteAll(rows) {
