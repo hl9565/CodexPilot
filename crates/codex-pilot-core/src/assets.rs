@@ -10,12 +10,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn injection_script_exposes_plugin_patch_status_bridge() {
+    fn injection_script_uses_enhancement_plugin_settings() {
         let script = injection_script(57321);
 
-        assert!(script.contains("/provider/plugin-patch-status"));
-        assert!(script.contains("pluginPatchStatus()"));
-        assert!(script.contains("plugin_patch_status"));
+        assert!(script.contains("pluginEntryUnlock"));
+        assert!(script.contains("forcePluginInstall"));
+        assert!(!script.contains("/provider/plugin-patch-status"));
+        assert!(!script.contains("pluginPatchStatus()"));
     }
 
     #[test]

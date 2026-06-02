@@ -50,13 +50,6 @@ pub async fn handle_bridge_request(ctx: BridgeContext, path: &str, payload: Valu
         "/session/move-workspace" => move_thread_workspace(ctx, payload).await,
         "/session/thread-sort-key" => thread_sort_key(ctx, payload).await,
         "/session/thread-sort-keys" => thread_sort_keys(ctx, payload).await,
-        "/provider/status" => json!({
-            "status": "ok",
-            "provider": crate::relay_config::default_relay_provider_config()
-        }),
-        "/provider/plugin-patch-status" => plugin_patch_status(),
-        "/provider/apply" => apply_provider(payload),
-        "/provider/clear" => clear_provider(),
         "/enhancement/settings" => enhancement_settings(),
         "/diagnostics/report" => report_diagnostics(payload),
         _ => json!({
@@ -128,42 +121,6 @@ fn enhancement_settings() -> Value {
             "forcePluginInstall": parsed.get("forcePluginInstall").and_then(Value::as_bool).unwrap_or(true)
         }
     })
-}
-
-fn plugin_patch_status() -> Value {
-    let provider = crate::relay_config::default_relay_provider_config();
-    json!({
-        "status": "ok",
-        "result": {
-            "mode": provider.mode,
-            "authenticated": provider.authenticated,
-            "configured": provider.configured,
-            "pluginPatchEnabled": provider.active && provider.mode == "api"
-        }
-    })
-}
-
-fn apply_provider(payload: Value) -> Value {
-    let base_url = payload
-        .get("base_url")
-        .or_else(|| payload.get("baseUrl"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let bearer_token = payload
-        .get("bearer_token")
-        .or_else(|| payload.get("bearerToken"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-
-    crate::relay_config::apply_relay_provider_config(base_url, bearer_token)
-        .map(|result| json!({"status": "ok", "result": result}))
-        .unwrap_or_else(|error| failed(error.to_string()))
-}
-
-fn clear_provider() -> Value {
-    crate::relay_config::clear_relay_provider_config()
-        .map(|result| json!({"status": "ok", "result": result}))
-        .unwrap_or_else(|error| failed(error.to_string()))
 }
 
 fn report_diagnostics(payload: Value) -> Value {
@@ -394,49 +351,4 @@ mod tests {
         let _ = std::fs::remove_file(db_path);
     }
 
-    #[test]
-    fn plugin_patch_status_enables_for_api_mode() {
-        let root = std::env::temp_dir().join(format!(
-            "codex-pilot-plugin-patch-status-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("config.toml"),
-            r#"model_provider = "CodexPilot"
-
-[model_providers.CodexPilot]
-name = "CodexPilot"
-wire_api = "responses"
-requires_openai_auth = true
-base_url = "https://api.example/v1"
-codex_pilot_channel_mode = "api"
-experimental_bearer_token = "sk-api"
-"#,
-        )
-        .unwrap();
-        std::fs::write(root.join("auth.json"), r#"{"OPENAI_API_KEY":"sk-api"}"#).unwrap();
-
-        let provider =
-            crate::relay_config::relay_provider_config_from_path(&root.join("config.toml"));
-        assert_eq!(provider.mode, "api");
-        assert!(provider.configured);
-
-        let payload = json!({
-            "status": "ok",
-            "result": {
-                "mode": provider.mode,
-                "authenticated": provider.authenticated,
-                "configured": provider.configured,
-                "pluginPatchEnabled": provider.active && provider.mode == "api"
-            }
-        });
-        assert_eq!(payload["result"]["mode"], "api");
-        assert_eq!(payload["result"]["pluginPatchEnabled"], true);
-
-        let _ = std::fs::remove_dir_all(root);
-    }
 }
