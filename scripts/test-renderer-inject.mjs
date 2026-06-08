@@ -18,9 +18,9 @@ class MiniElement {
     this.parentElement = null;
     this.dataset = {};
     this.eventListeners = new Map();
-    this.className = "";
+    this._className = "";
     this.disabled = false;
-    this.id = "";
+    this._id = "";
     this.title = "";
     this.style = {};
     this.isConnected = true;
@@ -41,6 +41,32 @@ class MiniElement {
 
   getAttribute(name) {
     return this.attributes.get(name) ?? null;
+  }
+
+  set id(value) {
+    this._id = String(value);
+    if (this._id) {
+      this.attributes.set("id", this._id);
+    } else {
+      this.attributes.delete("id");
+    }
+  }
+
+  get id() {
+    return this._id;
+  }
+
+  set className(value) {
+    this._className = String(value);
+    if (this._className) {
+      this.attributes.set("class", this._className);
+    } else {
+      this.attributes.delete("class");
+    }
+  }
+
+  get className() {
+    return this._className;
   }
 
   append(...nodes) {
@@ -107,6 +133,11 @@ class MiniElement {
       current = current.parentElement;
     }
     return null;
+  }
+
+  contains(node) {
+    if (node === this) return true;
+    return this.children.some((child) => child.contains(node));
   }
 
   matches(selector) {
@@ -241,7 +272,14 @@ function makeMessage({ text, role = "user", testId = "", className = "", offsetT
   return message;
 }
 
-function createFixture({ backendStatusMode = "ok", includeOther = true, messages } = {}) {
+function createFixture({
+  backendStatusMode = "ok",
+  includeOther = true,
+  messages,
+  url = "https://chatgpt.com/codex",
+  delaySettingStorageImport = false,
+  enhancementSettings = {}
+} = {}) {
   const document = new MiniDocument();
   const selected = makeThreadRow("thread-selected-12345", "测试对话", true);
   const other = includeOther ? makeThreadRow("thread-other-12345", "其他对话", false) : null;
@@ -259,6 +297,24 @@ function createFixture({ backendStatusMode = "ok", includeOther = true, messages
   const mutationObservers = [];
   const navigationClicks = [];
   const timeoutQueue = [];
+  const dispatchedMessages = [];
+  const dispatcher = {
+    dispatchMessage(type, payload) {
+      dispatchedMessages.push({ type, payload });
+      return { type, payload };
+    }
+  };
+  let releaseSettingStorageImport = null;
+  let settingStorageImportStarted = 0;
+  const settingStorageModule = {
+    v: class FixtureDispatcher {
+      static getInstance() {
+        return dispatcher;
+      }
+
+      dispatchMessage() {}
+    }
+  };
   class FixtureMutationObserver {
     constructor(callback) {
       this.callback = callback;
@@ -273,6 +329,13 @@ function createFixture({ backendStatusMode = "ok", includeOther = true, messages
   }
   const context = {
     console: { info() {} },
+    performance: {
+      getEntriesByType(type) {
+        return type === "resource"
+          ? [{ name: "https://chatgpt.com/assets/setting-storage-fixture.js" }]
+          : [];
+      }
+    },
     setTimeout(callback, delay = 0) {
       if (typeof callback === "function" && Number(delay) < 1000) callback();
       return 1;
@@ -286,8 +349,19 @@ function createFixture({ backendStatusMode = "ok", includeOther = true, messages
       replaceState() {}
     },
     window: {
+      __CODEX_PILOT_TEST__: true,
+      __CODEX_PILOT_TEST_LOAD_CODEX_APP_MODULE__(namePart) {
+        assert.equal(namePart, "setting-storage-", "Fast dispatcher patch 应加载 Codex setting storage 模块");
+        settingStorageImportStarted += 1;
+        if (delaySettingStorageImport) {
+          return new Promise((resolve) => {
+            releaseSettingStorageImport = () => resolve(settingStorageModule);
+          });
+        }
+        return Promise.resolve(settingStorageModule);
+      },
       location: {
-        href: "https://chatgpt.com/codex",
+        href: url,
         reloadCalled: false,
         reload() {
           this.reloadCalled = true;
@@ -318,6 +392,9 @@ function createFixture({ backendStatusMode = "ok", includeOther = true, messages
         },
         setItem(key, value) {
           storage.set(key, String(value));
+        },
+        removeItem(key) {
+          storage.delete(key);
         }
       },
       confirm(message) {
@@ -364,7 +441,8 @@ function createFixture({ backendStatusMode = "ok", includeOther = true, messages
               enabled: true,
               timeline: true,
               inlineActions: true,
-              scrollRestore: true
+              scrollRestore: true,
+              ...enhancementSettings
             }
           });
         }
@@ -407,8 +485,27 @@ function createFixture({ backendStatusMode = "ok", includeOther = true, messages
   context.window.window = context.window;
   context.window.document = document;
   context.window.history = context.history;
+  context.window.performance = context.performance;
   vm.runInNewContext(source, context, { filename: "renderer-inject.js" });
-  return { bridgeCalls, confirmMessages, context, document, intervals, messages: threadMessages, mutationObservers, navigationClicks, navigationStateByCall, other, selected, timeoutQueue };
+  return {
+    bridgeCalls,
+    confirmMessages,
+    context,
+    dispatchedMessages,
+    dispatcher,
+    document,
+    intervals,
+    messages: threadMessages,
+    mutationObservers,
+    navigationClicks,
+    navigationStateByCall,
+    other,
+    releaseSettingStorageImport: () => releaseSettingStorageImport?.(),
+    selected,
+    settingStorageImportStarted: () => settingStorageImportStarted,
+    storage,
+    timeoutQueue
+  };
 }
 
 async function deleteSelected(fixture) {
@@ -482,13 +579,19 @@ async function flushAsyncWork() {
   assert.equal(rowDeleteButton.title, "删除会话");
   const rowExportButton = selected.row.querySelectorAll("button")
     .find((button) => button.getAttribute("aria-label") === "导出 Markdown");
-  assert.ok(rowExportButton, "应在会话行添加导出按钮");
+  assert.equal(rowExportButton, undefined, "会话行不再显示 Markdown 导出按钮");
   const rowActionGroup = selected.row.querySelector(".codex-pilot-row-actions");
   assert.ok(rowActionGroup, "应创建独立的会话行操作组");
-  assert.equal(rowActionGroup.children.length, 2, "会话行操作组只包含 CodexPilot 自己的按钮");
+  assert.equal(rowActionGroup.children.length, 1, "会话行操作组只包含删除按钮");
   const styleText = document.getElementById("codex-pilot-style").textContent;
-  assert.match(styleText, /right:\s*76px;/, "会话行操作组应避开 Codex 原生右侧按钮");
-  assert.match(styleText, /mask-image:\s*linear-gradient/, "悬停时应遮罩标题，避免文字与操作按钮重叠");
+  const rowActionsStyle = styleText.match(/\.codex-pilot-row-actions\s*\{[^}]+\}/)?.[0] || "";
+  assert.match(rowActionsStyle, /right:\s*140px;/, "会话行操作组应落在原导出按钮位置，避开 Codex 原生右侧按钮");
+  assert.doesNotMatch(rowActionsStyle, /left:\s*\d+px;/, "会话行操作组不应同时保留左侧定位");
+  assert.match(
+    styleText,
+    /mask-image:\s*linear-gradient\(90deg,\s*#000 calc\(100% - 132px\),\s*transparent calc\(100% - 116px\)/,
+    "悬停时应遮罩标题右侧，避免文字与操作按钮重叠"
+  );
 
   const timeline = document.getElementById("codex-pilot-timeline");
   assert.ok(timeline, "应为长对话创建时间线");
@@ -604,6 +707,194 @@ async function flushAsyncWork() {
   fixture.mutationObservers.forEach((observer) => observer.trigger());
   const timelines = fixture.document.querySelectorAll("#codex-pilot-timeline");
   assert.equal(timelines.length, 1, "重复刷新不能创建多个时间线根节点");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  assert.ok(api, "测试环境应暴露 Fast 测试 API");
+  api.clear();
+  const root = fixture.document.getElementById("codex-pilot-root");
+  const fastToggle = root.querySelector(".codex-pilot-fast-toggle");
+  const panelToggle = root.querySelector(".codex-pilot-button");
+  assert.ok(fastToggle, "Pilot pill 应显示 Fast 闪电按钮");
+  const openBeforeFastClick = root.dataset.open;
+  await fastToggle.click();
+  assert.equal(root.dataset.open, openBeforeFastClick, "点击 Fast 不能打开 Pilot 面板");
+  assert.notEqual(root.dataset.open, "true", "点击 Fast 后 Pilot 面板不应处于打开状态");
+  assert.equal(fastToggle.dataset.mode, "fast", "新对话 draft 应显示 Fast");
+
+  const start = api.override({
+    type: "send-cli-request-for-host",
+    method: "thread/start",
+    params: { prompt: "hello" }
+  });
+  assert.equal(start.params.serviceTier, "priority", "Fast draft 应让新对话首请求使用 priority");
+  const store = api.state();
+  assert.equal(store.draft.pendingBind, true, "draft-backed 请求后应进入待绑定状态");
+  assert.ok(store.draft.startToken, "待绑定 draft 应记录 start token");
+  await panelToggle.click();
+  assert.equal(root.dataset.open, "true", "Pilot 面板按钮仍应独立工作");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  await fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  api.override({
+    type: "send-cli-request-for-host",
+    method: "thread/start",
+    params: { prompt: "hello" }
+  });
+  fixture.context.window.location.href = "https://chatgpt.com/codex/thread-selected-12345";
+  assert.equal(api.bind("test_old_thread", "thread-selected-12345"), false, "draft 不应绑定到发起前已存在的旧 thread");
+  assert.ok(api.state().draft, "误入旧 thread 时 draft 应保留等待真正新 thread");
+
+  fixture.context.window.location.href = "https://chatgpt.com/codex/thread-new-98765";
+  assert.equal(api.bind("test_new_thread", "thread-new-98765"), true, "draft 应绑定到新出现的 thread id");
+  assert.equal(api.state().entries["thread-new-98765"].mode, "fast", "绑定后新 thread 应保存 Fast 覆盖");
+  assert.equal(api.state().draft, null, "成功绑定后应清理 draft");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  await fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  api.override({
+    type: "send-cli-request-for-host",
+    method: "thread/start",
+    params: { prompt: "first" }
+  });
+  const firstDraft = api.state().draft;
+  assert.equal(firstDraft.existingSessionIds.includes("thread-new-98765"), false, "首个 start 前快照不包含新 thread");
+
+  const newThread = makeThreadRow("thread-new-98765", "新对话", false);
+  fixture.document.body.append(newThread.listItem);
+  api.override({
+    type: "thread-prewarm-start",
+    request: {
+      params: { prompt: "prewarm after row appears" }
+    }
+  });
+  const secondDraft = api.state().draft;
+  assert.equal(secondDraft.startToken, firstDraft.startToken, "pending draft 的 start token 不应被后续 envelope 覆盖");
+  assert.equal(secondDraft.existingSessionIds.includes("thread-new-98765"), false, "pending draft 的旧 thread 快照不应被后续 envelope 污染");
+  assert.equal(api.bind("test_new_thread_after_second_start", "thread-new-98765"), true, "新 thread 出现在侧边栏后仍应能绑定 draft");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex/thread-selected-12345" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  api.setThread("thread-selected-12345", "fast");
+  const turn = api.override({
+    type: "mcp-request",
+    request: {
+      method: "turn/start",
+      params: { conversationId: "thread-selected-12345", input: "continue" }
+    }
+  });
+  assert.equal(turn.request.params.serviceTier, "priority", "Fast thread 的 turn/start 应使用 priority");
+
+  api.setThread("thread-selected-12345", "standard");
+  const resume = api.override({
+    type: "worker-request",
+    request: {
+      method: "thread/resume",
+      params: { threadId: "thread-selected-12345", serviceTier: "priority" }
+    }
+  });
+  assert.equal(resume.request.params.serviceTier, null, "显式 Standard 覆盖应清除 priority");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex/thread-selected-12345" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  api.setThread("thread-selected-12345", "fast");
+  const start = api.override({
+    type: "send-cli-request-for-host",
+    method: "thread/start",
+    params: { prompt: "new conversation" }
+  });
+  assert.equal(start.params.serviceTier, undefined, "thread/start 不应回退到当前旧 thread 的 Fast 覆盖");
+
+  api.override({ type: "mcp-request", request: null });
+  assert.ok(
+    fixture.bridgeCalls.some((call) => call.path === "/diagnostics/report" && call.payload?.event === "thread_fast_request_override_unsupported"),
+    "支持 type 但结构不符合预期时应写诊断"
+  );
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  api.setDraft("fast");
+  fixture.context.window.location.href = "https://chatgpt.com/codex/thread-selected-12345";
+  const state = api.uiState();
+  assert.equal(state.source, "none", "已有会话没有 override 时不应显示新对话 draft 状态");
+  assert.equal(state.sessionId, "selected-12345", "已有会话 UI 状态应保留当前 thread id");
+  assert.equal(state.mode, "standard", "已有会话没有 override 时应显示 Standard");
+
+  const start = api.override({
+    type: "send-cli-request-for-host",
+    method: "thread/start",
+    params: { threadId: "selected-12345", prompt: "existing thread start" }
+  });
+  assert.equal(start.params.serviceTier, undefined, "带已有 threadId 的 thread/start 不应消费 draft");
+  assert.ok(api.state().draft, "已有 threadId 请求不能清理下一条新对话 draft");
+}
+
+{
+  const fixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    enhancementSettings: { scrollRestore: false }
+  });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  await fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  const start = api.override({
+    type: "send-cli-request-for-host",
+    method: "thread/start",
+    params: { prompt: "hello without scroll restore" }
+  });
+  assert.equal(start.params.serviceTier, "priority", "scrollRestore 关闭时新对话首请求仍应使用 priority");
+  fixture.context.window.location.href = "https://chatgpt.com/codex/thread-new-98765";
+  const routeInterval = fixture.intervals.find((item) => item.delay === 650);
+  assert.ok(routeInterval, "Fast draft 绑定应安装独立 route/session 监听");
+  routeInterval.callback();
+  await flushAsyncWork();
+  assert.equal(api.state().entries["new-98765"].mode, "fast", "scrollRestore 关闭时 draft 仍应绑定到新 thread");
+  assert.equal(api.state().draft, null, "绑定成功后应清理 draft");
+}
+
+{
+  const fixture = createFixture({ delaySettingStorageImport: true });
+  await flushAsyncWork();
+  const installInterval = fixture.intervals.find((item) => item.delay === 1500);
+  assert.ok(installInterval, "应启动刷新 interval");
+  installInterval.callback();
+  installInterval.callback();
+  await flushAsyncWork();
+  assert.equal(fixture.settingStorageImportStarted(), 1, "dispatcher patch 加载中重复调用不应重复 import");
+  fixture.releaseSettingStorageImport();
+  await flushAsyncWork();
+  const dispatcher = fixture.dispatcher;
+  dispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "hello" }
+  });
+  assert.equal(fixture.dispatchedMessages.length, 1, "dispatcher 只能被包装一层");
 }
 
 console.log("renderer-inject fixture tests passed");
