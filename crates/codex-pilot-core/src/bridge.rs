@@ -526,4 +526,17 @@ mod tests {
         assert!(expression.contains("window.__codexPilotReject"));
         assert!(expression.contains(r#""bad \"payload\"""#));
     }
+
+    #[test]
+    fn injected_renderer_script_contains_thread_fast_controls() {
+        let script = crate::assets::injection_script(57321);
+
+        assert!(script.contains("codex-pilot-fast-toggle"));
+        assert!(script.contains("toggleCurrentServiceTierMode"));
+        assert!(script.contains("installServiceTierDispatcherPatch"));
+        assert!(script.contains("send-cli-request-for-host"));
+        assert!(script.contains("start-conversation"));
+        assert!(script.contains("下一条新对话将使用 Fast"));
+        assert!(script.contains("当前对话已切换为 Fast"));
+    }
 }

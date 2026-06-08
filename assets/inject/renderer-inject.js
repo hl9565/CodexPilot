@@ -25,6 +25,12 @@
   const actionButtonClass = "codex-pilot-row-action";
   const archiveActionClass = "codex-pilot-archive-action";
   const scrollStoreKey = "codexPilotThreadScroll";
+  const serviceTierStoreKey = "codexPilotThreadFastMode";
+  const serviceTierStoreVersion = 1;
+  const serviceTierDraftTtlMs = 60000;
+  const fastServiceTierValue = "priority";
+  const fastMaxEntries = 120;
+  const fastDispatcherPatchVersion = "2";
   const maxScrollEntries = 100;
   const selectors = {
     sidebarThread: "[data-app-action-sidebar-thread-id]",
@@ -42,6 +48,15 @@
   let consecutiveBackendTimeouts = 0;
   let recoveryInFlight = false;
   let lastRecoveryAttemptAt = 0;
+  let activeFastSessionId = "";
+  let fastToggleButton = null;
+  let fastToggleLabel = null;
+  let fastPendingBindStartedAt = 0;
+  let fastPendingBindStartToken = "";
+  let fastModuleLoadPromise = null;
+  let fastDispatcherPatchInstalled = false;
+  let fastDispatcherPatchPromise = null;
+  let routeTrackingInstalled = false;
   const backendStatusTimeoutMs = 2000;
   const backendRecoveryThreshold = 3;
   const backendRecoveryCooldownMs = 60000;
@@ -52,6 +67,31 @@
     scrollRestore: true
   };
   let enhancementSettings = { ...defaultEnhancementSettings };
+
+  function codexAppAssetUrl(namePart) {
+    const urls = [
+      ...Array.from(document.scripts || []).map((script) => script.src),
+      ...Array.from(document.querySelectorAll("link[href]") || []).map((link) => link.href),
+      ...performance.getEntriesByType("resource").map((entry) => entry.name),
+    ].filter(Boolean);
+    return urls.find((url) => url.includes("/assets/") && url.includes(namePart) && url.split("?")[0].endsWith(".js")) || "";
+  }
+
+  async function loadCodexAppModule(namePart) {
+    if (!fastModuleLoadPromise || fastModuleLoadPromise.namePart !== namePart) {
+      const promise = Promise.resolve().then(async () => {
+        if (window.__CODEX_PILOT_TEST__ && typeof window.__CODEX_PILOT_TEST_LOAD_CODEX_APP_MODULE__ === "function") {
+          return await window.__CODEX_PILOT_TEST_LOAD_CODEX_APP_MODULE__(namePart);
+        }
+        const url = codexAppAssetUrl(namePart);
+        if (!url) throw new Error(`未找到 Codex App asset: ${namePart}`);
+        return await import(url);
+      });
+      promise.namePart = namePart;
+      fastModuleLoadPromise = promise;
+    }
+    return await fastModuleLoadPromise;
+  }
 
   function isActiveBoot() {
     return window.__CODEX_PILOT_BOOT_ID__ === bootId;
@@ -174,6 +214,53 @@
         min-height: 30px;
         padding: 0 10px;
         transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+      }
+
+      #${rootId} .codex-pilot-pill {
+        align-items: center;
+        display: inline-flex;
+        gap: 6px;
+      }
+
+      #${rootId} .codex-pilot-fast-toggle {
+        align-items: center;
+        background: rgba(255, 255, 255, 0.86);
+        border: 1px solid rgba(148, 163, 184, 0.42);
+        border-radius: 999px;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+        color: #94a3b8;
+        cursor: pointer;
+        display: inline-flex;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 700;
+        gap: 4px;
+        min-height: 30px;
+        min-width: 30px;
+        padding: 0 8px;
+        transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
+      }
+
+      #${rootId} .codex-pilot-fast-toggle:hover {
+        background: rgba(255, 255, 255, 0.96);
+        border-color: rgba(100, 116, 139, 0.55);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+      }
+
+      #${rootId} .codex-pilot-fast-toggle[data-mode="fast"] {
+        color: #d6a21d;
+      }
+
+      #${rootId} .codex-pilot-fast-toggle svg {
+        display: block;
+        height: 14px;
+        width: 14px;
+      }
+
+      #${rootId} .codex-pilot-fast-label {
+        line-height: 1;
+        overflow: hidden;
+        white-space: nowrap;
       }
 
       #${rootId} .codex-pilot-button:hover,
@@ -615,6 +702,388 @@
     const bySelectedRow = sessionRefFromSelectedRow();
     const byVisibleRow = sessionRefFromVisibleRows(byUrl?.session_id);
     return bySelectedRow || byVisibleRow || byUrl || null;
+  }
+
+  function normalizeServiceTierMode(mode) {
+    const normalized = String(mode || "").trim().toLowerCase();
+    return normalized === "fast" ? "fast" : "standard";
+  }
+
+  function validServiceTierSessionKey(sessionId) {
+    const key = String(sessionId || "").trim();
+    if (!key || key === "__proto__" || key === "prototype" || key === "constructor") return "";
+    return /^[A-Za-z0-9_.-]{8,128}$/.test(key) ? key : "";
+  }
+
+  function serviceTierSessionIdsInSidebar() {
+    const ids = Array.from(document.querySelectorAll(selectors.sidebarThread))
+      .map((row) => validServiceTierSessionKey(row.getAttribute("data-app-action-sidebar-thread-id")));
+    try {
+      ids.push(...Object.keys(readScrollStore() || {}).map(validServiceTierSessionKey));
+    } catch (_error) {}
+    return Array.from(new Set(ids.filter(Boolean))).slice(0, fastMaxEntries);
+  }
+
+  function isCodexDraftRoute() {
+    try {
+      const url = new URL(window.location.href || "");
+      const pathname = url.pathname.replace(/\/+$/, "");
+      return pathname === "/codex" || pathname.endsWith("/codex/new");
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function currentServiceTierSessionKey() {
+    const byUrl = validServiceTierSessionKey(sessionRefFromUrl()?.session_id);
+    if (byUrl) return byUrl;
+    if (isCodexDraftRoute()) return "";
+    return validServiceTierSessionKey(sessionRefFromSelectedRow()?.session_id);
+  }
+
+  function currentServiceTierBindSessionKey() {
+    return validServiceTierSessionKey(sessionRefFromUrl()?.session_id);
+  }
+
+  function isFastMode(mode) {
+    return normalizeServiceTierMode(mode) === "fast";
+  }
+
+  function readServiceTierStore() {
+    try {
+      const parsed = JSON.parse(window.localStorage?.getItem(serviceTierStoreKey) || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return { version: serviceTierStoreVersion, entries: {}, draft: null };
+      }
+      const rawEntries = parsed.version === serviceTierStoreVersion && parsed.entries && typeof parsed.entries === "object"
+        ? parsed.entries
+        : {};
+      const entries = Object.create(null);
+      Object.entries(rawEntries).forEach(([key, value]) => {
+        const sessionId = validServiceTierSessionKey(key);
+        if (!sessionId) return;
+        const mode = normalizeServiceTierMode(value?.mode);
+        entries[sessionId] = {
+          mode,
+          at: finiteScrollNumber(value?.at) || Date.now()
+        };
+      });
+      const draftRaw = parsed.version === serviceTierStoreVersion ? parsed.draft : null;
+      const draft = draftRaw && typeof draftRaw === "object"
+        ? {
+            mode: normalizeServiceTierMode(draftRaw.mode),
+            at: finiteScrollNumber(draftRaw.at) || Date.now(),
+            pendingBind: draftRaw.pendingBind === true,
+            startToken: String(draftRaw.startToken || ""),
+            previousSessionId: validServiceTierSessionKey(draftRaw.previousSessionId),
+            existingSessionIds: Array.isArray(draftRaw.existingSessionIds)
+              ? draftRaw.existingSessionIds.map(validServiceTierSessionKey).filter(Boolean).slice(0, fastMaxEntries)
+              : []
+          }
+        : null;
+      if (draft && Date.now() - draft.at > serviceTierDraftTtlMs) {
+        return { version: serviceTierStoreVersion, entries, draft: null };
+      }
+      return { version: serviceTierStoreVersion, entries, draft };
+    } catch (error) {
+      reportRendererEvent("thread_fast_store_read_error", { message: String(error) });
+      return { version: serviceTierStoreVersion, entries: {}, draft: null };
+    }
+  }
+
+  function writeServiceTierStore(store) {
+    try {
+      const payload = {
+        version: serviceTierStoreVersion,
+        entries: Object.fromEntries(
+          Object.entries(store?.entries || {})
+            .map(([key, value]) => [validServiceTierSessionKey(key), value])
+            .filter(([key, value]) => key && value && typeof value === "object")
+            .map(([key, value]) => [
+              key,
+              {
+                mode: normalizeServiceTierMode(value.mode),
+                at: finiteScrollNumber(value.at) || Date.now()
+              }
+            ])
+            .sort((left, right) => right[1].at - left[1].at)
+            .slice(0, fastMaxEntries)
+        ),
+        draft: store?.draft
+          ? {
+              mode: normalizeServiceTierMode(store.draft.mode),
+              at: finiteScrollNumber(store.draft.at) || Date.now(),
+              pendingBind: store.draft.pendingBind === true,
+              startToken: String(store.draft.startToken || ""),
+              previousSessionId: validServiceTierSessionKey(store.draft.previousSessionId),
+              existingSessionIds: Array.isArray(store.draft.existingSessionIds)
+                ? store.draft.existingSessionIds.map(validServiceTierSessionKey).filter(Boolean).slice(0, fastMaxEntries)
+                : []
+            }
+          : null
+      };
+      window.localStorage?.setItem(serviceTierStoreKey, JSON.stringify(payload));
+      return true;
+    } catch (error) {
+      reportRendererEvent("thread_fast_store_write_error", { message: String(error) });
+      return false;
+    }
+  }
+
+  function currentServiceTierThreadOverride(sessionId = currentServiceTierSessionKey()) {
+    const normalizedSessionId = validServiceTierSessionKey(sessionId);
+    if (!normalizedSessionId) return null;
+    const entry = readServiceTierStore().entries[normalizedSessionId];
+    if (!entry) return null;
+    return {
+      mode: normalizeServiceTierMode(entry.mode),
+      at: finiteScrollNumber(entry.at)
+    };
+  }
+
+  function currentServiceTierDraft() {
+    const draft = readServiceTierStore().draft;
+    if (!draft) return null;
+    if (Date.now() - draft.at > serviceTierDraftTtlMs) {
+      clearServiceTierDraft("expired");
+      return null;
+    }
+    return {
+      mode: normalizeServiceTierMode(draft.mode),
+      at: finiteScrollNumber(draft.at),
+      pendingBind: draft.pendingBind === true,
+      startToken: String(draft.startToken || ""),
+      previousSessionId: validServiceTierSessionKey(draft.previousSessionId),
+      existingSessionIds: Array.isArray(draft.existingSessionIds)
+        ? draft.existingSessionIds.map(validServiceTierSessionKey).filter(Boolean).slice(0, fastMaxEntries)
+        : []
+    };
+  }
+
+  function setServiceTierThreadOverride(sessionId, mode) {
+    const normalizedSessionId = validServiceTierSessionKey(sessionId);
+    if (!normalizedSessionId) return false;
+    const store = readServiceTierStore();
+    store.entries[normalizedSessionId] = {
+      mode: normalizeServiceTierMode(mode),
+      at: Date.now()
+    };
+    return writeServiceTierStore(store);
+  }
+
+  function setServiceTierDraft(
+    mode,
+    pendingBind = false,
+    startToken = "",
+    previousSessionId = currentServiceTierSessionKey(),
+    existingSessionIds = serviceTierSessionIdsInSidebar()
+  ) {
+    const store = readServiceTierStore();
+    store.draft = {
+      mode: normalizeServiceTierMode(mode),
+      at: Date.now(),
+      pendingBind,
+      startToken: String(startToken || ""),
+      previousSessionId: validServiceTierSessionKey(previousSessionId),
+      existingSessionIds: Array.isArray(existingSessionIds)
+        ? existingSessionIds.map(validServiceTierSessionKey).filter(Boolean).slice(0, fastMaxEntries)
+        : []
+    };
+    return writeServiceTierStore(store);
+  }
+
+  function clearServiceTierDraft(reason = "cleared") {
+    const store = readServiceTierStore();
+    if (!store.draft) return false;
+    store.draft = null;
+    const wrote = writeServiceTierStore(store);
+    if (wrote) {
+      reportRendererEvent("thread_fast_draft_cleared", { reason });
+    }
+    return wrote;
+  }
+
+  function markServiceTierDraftPendingBind(startToken = fastPendingBindStartToken || "") {
+    const store = readServiceTierStore();
+    if (!store.draft) return false;
+    if (store.draft.pendingBind) {
+      return true;
+    }
+    store.draft.pendingBind = true;
+    store.draft.at = Date.now();
+    store.draft.startToken = String(startToken || "");
+    store.draft.previousSessionId = validServiceTierSessionKey(store.draft.previousSessionId || currentServiceTierSessionKey());
+    store.draft.existingSessionIds = serviceTierSessionIdsInSidebar();
+    return writeServiceTierStore(store);
+  }
+
+  function currentServiceTierUiState() {
+    const sessionId = currentServiceTierSessionKey();
+    const threadOverride = currentServiceTierThreadOverride(sessionId);
+    if (threadOverride) {
+      return {
+        source: "thread",
+        sessionId,
+        mode: threadOverride.mode,
+        pendingBind: false
+      };
+    }
+    if (!sessionId) {
+      const draft = currentServiceTierDraft();
+      if (draft) {
+        return {
+          source: "draft",
+          sessionId: "",
+          mode: draft.mode,
+          pendingBind: draft.pendingBind
+        };
+      }
+    }
+    return {
+      source: "none",
+      sessionId,
+      mode: "standard",
+      pendingBind: false
+    };
+  }
+
+  function serviceTierDraftCanApplyToThreadStart(draft, threadId) {
+    if (!draft) return false;
+    const normalizedThreadId = validServiceTierSessionKey(threadId);
+    if (!normalizedThreadId) return true;
+    if (draft.previousSessionId && draft.previousSessionId === normalizedThreadId) return false;
+    if (draft.existingSessionIds?.includes(normalizedThreadId)) return false;
+    const currentSessionId = currentServiceTierSessionKey();
+    if (!draft.pendingBind && currentSessionId && currentSessionId === normalizedThreadId) return false;
+    return true;
+  }
+
+  function currentServiceTierDraftForThreadStart(threadId = "") {
+    const draft = currentServiceTierDraft();
+    if (!serviceTierDraftCanApplyToThreadStart(draft, threadId)) return null;
+    return draft;
+  }
+
+  function handleServiceTierSessionMaybeChanged(reason = "poll") {
+    const bindSessionId = currentServiceTierBindSessionKey();
+    if (bindSessionId) {
+      maybeBindDraftToCurrentSession(reason, bindSessionId);
+    }
+    refreshFastToggleUi();
+  }
+
+  function handleRouteMaybeChanged(reason = "poll") {
+    handleServiceTierSessionMaybeChanged(reason);
+    if (enhancementSettings.scrollRestore) {
+      handleThreadMaybeChanged(reason);
+    }
+  }
+
+  function installRouteChangeTracking() {
+    if (!enhancementSettings.enabled || routeTrackingInstalled) return;
+    routeTrackingInstalled = true;
+    handleServiceTierSessionMaybeChanged("route_tracking_ready");
+    ["pushState", "replaceState"].forEach((method) => {
+      const originalKey = `__codexPilotOriginal${method}`;
+      const original = window[originalKey] || history?.[method];
+      if (typeof original !== "function") return;
+      window[originalKey] = original;
+      history[method] = function codexPilotPatchedHistory(...args) {
+        if (!isActiveBoot()) {
+          return original.apply(this, args);
+        }
+        if (enhancementSettings.scrollRestore) {
+          saveThreadScrollPosition(`before_${method}`);
+        }
+        const result = original.apply(this, args);
+        setTimeout(() => handleRouteMaybeChanged(method), 0);
+        return result;
+      };
+    });
+    if (!window.__codexPilotPopstatePatched) {
+      window.__codexPilotPopstatePatched = true;
+      window.addEventListener?.("popstate", () => {
+        if (!window.__CODEX_PILOT_ACTIVE_POPSTATE_HANDLER__) return;
+        window.__CODEX_PILOT_ACTIVE_POPSTATE_HANDLER__();
+      }, true);
+    }
+    window.__CODEX_PILOT_ACTIVE_POPSTATE_HANDLER__ = () => {
+      if (!isActiveBoot()) return;
+      if (enhancementSettings.scrollRestore) {
+        saveThreadScrollPosition("before_popstate");
+      }
+      setTimeout(() => handleRouteMaybeChanged("popstate"), 0);
+    };
+    if (typeof window.setInterval === "function") {
+      routeCheckTimer = window.setInterval(() => {
+        if (!isActiveBoot()) return;
+        handleRouteMaybeChanged("interval");
+      }, 650);
+    }
+  }
+
+  function currentServiceTierTooltip(state = currentServiceTierUiState()) {
+    if (state.source === "draft") {
+      return state.mode === "fast"
+        ? "下一条新对话将使用 Fast"
+        : "下一条新对话将使用 Standard";
+    }
+    return state.mode === "fast"
+      ? "当前对话使用 Fast"
+      : "当前对话使用 Standard";
+  }
+
+  function currentServiceTierToast(state = currentServiceTierUiState()) {
+    if (state.source === "draft") {
+      return state.mode === "fast"
+        ? "下一条新对话将使用 Fast"
+        : "下一条新对话将使用 Standard";
+    }
+    return state.mode === "fast"
+      ? "当前对话已切换为 Fast"
+      : "当前对话已切换为 Standard";
+  }
+
+  function refreshFastToggleUi() {
+    const state = currentServiceTierUiState();
+    activeFastSessionId = state.source === "thread" ? state.sessionId : "";
+    if (fastToggleButton) {
+      fastToggleButton.dataset.mode = state.mode;
+      fastToggleButton.dataset.source = state.source;
+      fastToggleButton.title = currentServiceTierTooltip(state);
+      fastToggleButton.setAttribute("aria-label", currentServiceTierTooltip(state));
+    }
+    if (fastToggleLabel) {
+      fastToggleLabel.textContent = state.mode === "fast" ? "Fast" : "";
+    }
+  }
+
+  function toggleCurrentServiceTierMode() {
+    const state = currentServiceTierUiState();
+    const nextMode = state.mode === "fast" ? "standard" : "fast";
+    const sessionId = currentServiceTierSessionKey();
+    let wrote = false;
+    if (sessionId) {
+      wrote = setServiceTierThreadOverride(sessionId, nextMode);
+      clearServiceTierDraft("replaced_by_thread_toggle");
+    } else if (nextMode === "standard") {
+      wrote = clearServiceTierDraft("draft_toggled_standard") || true;
+    } else {
+      wrote = setServiceTierDraft(nextMode, false);
+    }
+    if (wrote) {
+      refreshFastToggleUi();
+      showToast(currentServiceTierToast({
+        source: sessionId ? "thread" : "draft",
+        sessionId,
+        mode: nextMode
+      }), null);
+      reportRendererEvent("thread_fast_toggled", {
+        source: sessionId ? "thread" : "draft",
+        session_id: sessionId,
+        mode: nextMode
+      });
+    }
   }
 
   function sessionPayload(session) {
@@ -1294,7 +1763,10 @@
 
   function handleThreadMaybeChanged(reason = "poll") {
     const nextSessionId = currentSessionKey();
-    if (!nextSessionId || nextSessionId === activeScrollSessionId) return;
+    if (!nextSessionId || nextSessionId === activeScrollSessionId) {
+      refreshFastToggleUi();
+      return;
+    }
     if (activeScrollSessionId) {
       saveThreadScrollPosition(`before_${reason}`);
     }
@@ -1309,6 +1781,256 @@
       setTimeout(() => restoreThreadScrollPosition(nextSessionId, index), delay);
     });
     refreshTimelineSoon();
+    refreshFastToggleUi();
+  }
+
+  function maybeBindDraftToCurrentSession(reason = "unknown", sessionId = currentServiceTierBindSessionKey()) {
+    const normalizedSessionId = validServiceTierSessionKey(sessionId);
+    if (!normalizedSessionId) return false;
+    const draft = currentServiceTierDraft();
+    if (!draft || !draft.pendingBind) return false;
+    if (Date.now() - draft.at > serviceTierDraftTtlMs) {
+      clearServiceTierDraft("bind_timeout");
+      reportRendererEvent("thread_fast_bind_expired", { reason, session_id: normalizedSessionId });
+      return false;
+    }
+    if (draft.previousSessionId && draft.previousSessionId === normalizedSessionId) {
+      reportRendererEvent("thread_fast_bind_deferred", {
+        reason,
+        session_id: normalizedSessionId,
+        cause: "previous_session"
+      });
+      return false;
+    }
+    if (draft.existingSessionIds?.includes(normalizedSessionId)) {
+      reportRendererEvent("thread_fast_bind_deferred", {
+        reason,
+        session_id: normalizedSessionId,
+        cause: "existing_sidebar_session"
+      });
+      return false;
+    }
+    const existing = currentServiceTierThreadOverride(normalizedSessionId);
+    if (existing && existing.at >= draft.at) {
+      clearServiceTierDraft("existing_thread_override_newer");
+      reportRendererEvent("thread_fast_bind_skipped", {
+        reason,
+        session_id: normalizedSessionId,
+        existing_mode: existing.mode
+      });
+      return false;
+    }
+    const wrote = setServiceTierThreadOverride(normalizedSessionId, draft.mode);
+    if (!wrote) return false;
+    clearServiceTierDraft("bound");
+    reportRendererEvent("thread_fast_bound", {
+      reason,
+      session_id: normalizedSessionId,
+      mode: draft.mode
+    });
+    return true;
+  }
+
+  function supportedServiceTierMethods() {
+    return new Set(["thread/start", "thread/resume", "turn/start"]);
+  }
+
+  function serviceTierRequestOverrideForMethod(method, params, threadIdHint = "") {
+    if (!supportedServiceTierMethods().has(method) || !params || typeof params !== "object") return null;
+    const threadId = method === "thread/start"
+      ? validServiceTierSessionKey(params.threadId || threadIdHint)
+      : validServiceTierSessionKey(params.threadId || params.conversationId || threadIdHint || currentServiceTierSessionKey());
+    const threadOverride = currentServiceTierThreadOverride(threadId);
+    if (threadOverride) {
+      return {
+        source: "thread",
+        sessionId: threadId,
+        mode: threadOverride.mode,
+        serviceTier: isFastMode(threadOverride.mode) ? fastServiceTierValue : null
+      };
+    }
+    if (method === "thread/start") {
+      const draft = currentServiceTierDraftForThreadStart(threadId);
+      if (draft) {
+        return {
+          source: "draft",
+          sessionId: "",
+          mode: draft.mode,
+          serviceTier: isFastMode(draft.mode) ? fastServiceTierValue : null
+        };
+      }
+    }
+    return null;
+  }
+
+  function applyServiceTierRequestOverride(method, params, threadIdHint = "") {
+    const override = serviceTierRequestOverrideForMethod(method, params, threadIdHint);
+    if (!override) return params;
+    const nextParams = { ...(params || {}), serviceTier: override.serviceTier };
+    if (override.source === "draft") {
+      const startToken = `${Date.now()}-${Math.random()}`;
+      fastPendingBindStartToken = startToken;
+      markServiceTierDraftPendingBind(startToken);
+      fastPendingBindStartedAt = Date.now();
+    }
+    reportRendererEvent("thread_fast_request_override_applied", {
+      method,
+      source: override.source,
+      session_id: override.sessionId,
+      mode: override.mode,
+      service_tier: override.serviceTier || "standard"
+    });
+    return nextParams;
+  }
+
+  function overrideServiceTierForMessage(message) {
+    if (!message || typeof message !== "object") return message;
+    if (message.type === "send-cli-request-for-host") {
+      const method = String(message.method || "");
+      if (!method || !message.params || typeof message.params !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_method_or_params" });
+        return message;
+      }
+      const params = applyServiceTierRequestOverride(method, message.params);
+      return params === message.params ? message : { ...message, params };
+    }
+    if (message.type === "mcp-request") {
+      if (!message.request || typeof message.request !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_request" });
+        return message;
+      }
+      const method = String(message.request.method || "");
+      if (!method || !message.request.params || typeof message.request.params !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_method_or_params" });
+        return message;
+      }
+      const params = applyServiceTierRequestOverride(method, message.request.params);
+      return params === message.request.params ? message : { ...message, request: { ...message.request, params } };
+    }
+    if (message.type === "worker-request") {
+      if (!message.request || typeof message.request !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_request" });
+        return message;
+      }
+      const method = String(message.request.method || "");
+      if (!method || !message.request.params || typeof message.request.params !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_method_or_params" });
+        return message;
+      }
+      const params = applyServiceTierRequestOverride(method, message.request.params);
+      return params === message.request.params ? message : { ...message, request: { ...message.request, params } };
+    }
+    if (message.type === "thread-prewarm-start") {
+      if (!message.request || typeof message.request !== "object" || !message.request.params || typeof message.request.params !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_request_params" });
+        return message;
+      }
+      const params = applyServiceTierRequestOverride("thread/start", message.request.params);
+      return params === message.request.params ? message : { ...message, request: { ...message.request, params } };
+    }
+    if (message.type === "start-conversation") {
+      const draft = currentServiceTierDraft();
+      if (!draft) return message;
+      const startToken = `${Date.now()}-${Math.random()}`;
+      fastPendingBindStartToken = startToken;
+      markServiceTierDraftPendingBind(startToken);
+      fastPendingBindStartedAt = Date.now();
+      reportRendererEvent("thread_fast_request_override_applied", {
+        method: "start-conversation",
+        source: "draft",
+        session_id: "",
+        mode: draft.mode,
+        service_tier: isFastMode(draft.mode) ? fastServiceTierValue : "standard"
+      });
+      return { ...message, serviceTier: isFastMode(draft.mode) ? fastServiceTierValue : null };
+    }
+    if (message.type === "prewarm-thread-start-for-host") {
+      if (!message.params || typeof message.params !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_params" });
+        return message;
+      }
+      const params = applyServiceTierRequestOverride("thread/start", message.params);
+      return params === message.params ? message : { ...message, params };
+    }
+    if (message.type === "start-thread-for-host") {
+      const params = applyServiceTierRequestOverride("thread/start", message);
+      return params === message ? message : params;
+    }
+    if (message.type === "start-turn-for-host") {
+      if (!message.params || typeof message.params !== "object") {
+        reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_params" });
+        return message;
+      }
+      const params = applyServiceTierRequestOverride("turn/start", message.params, message.conversationId);
+      return params === message.params ? message : { ...message, params };
+    }
+    return message;
+  }
+
+  function installServiceTierTestApi() {
+    if (!window.__CODEX_PILOT_TEST__) return;
+    window.__CODEX_PILOT_FAST_TEST__ = {
+      clear() {
+        window.localStorage?.removeItem?.(serviceTierStoreKey);
+        fastPendingBindStartedAt = 0;
+        fastPendingBindStartToken = "";
+        refreshFastToggleUi();
+      },
+      state() {
+        return readServiceTierStore();
+      },
+      uiState() {
+        return currentServiceTierUiState();
+      },
+      setThread(sessionId, mode) {
+        return setServiceTierThreadOverride(sessionId, mode);
+      },
+      setDraft(mode) {
+        return setServiceTierDraft(mode, false);
+      },
+      override(message) {
+        return overrideServiceTierForMessage(message);
+      },
+      bind(reason = "test", sessionId = currentServiceTierBindSessionKey()) {
+        return maybeBindDraftToCurrentSession(reason, sessionId);
+      }
+    };
+  }
+
+  function installServiceTierDispatcherPatch() {
+    if (window.__codexPilotFastDispatcherPatchInstalled === fastDispatcherPatchVersion) return;
+    if (fastDispatcherPatchInstalled) return;
+    if (fastDispatcherPatchPromise) return;
+    fastDispatcherPatchPromise = Promise.resolve().then(async () => {
+      try {
+        const module = await loadCodexAppModule("setting-storage-");
+        const dispatcherClass = typeof module.v === "function" && String(module.v).includes("dispatchMessage") ? module.v : null;
+        const dispatcher = dispatcherClass?.getInstance?.();
+        if (!dispatcher || typeof dispatcher.dispatchMessage !== "function") {
+          throw new Error("Codex dispatcher unavailable");
+        }
+        const originalDispatch = dispatcher.__codexPilotOriginalDispatchMessage || dispatcher.dispatchMessage.bind(dispatcher);
+        if (dispatcher.__codexPilotFastPatchVersion === fastDispatcherPatchVersion) {
+          fastDispatcherPatchInstalled = true;
+          window.__codexPilotFastDispatcherPatchInstalled = fastDispatcherPatchVersion;
+          return;
+        }
+        dispatcher.__codexPilotOriginalDispatchMessage = originalDispatch;
+        dispatcher.dispatchMessage = (type, payload) => {
+          const message = overrideServiceTierForMessage({ ...(payload || {}), type });
+          const nextType = message?.type || type;
+          const { type: _type, ...nextPayload } = message || {};
+          return originalDispatch(nextType, nextPayload);
+        };
+        dispatcher.__codexPilotFastPatchVersion = fastDispatcherPatchVersion;
+        fastDispatcherPatchInstalled = true;
+        window.__codexPilotFastDispatcherPatchInstalled = fastDispatcherPatchVersion;
+        reportRendererEvent("thread_fast_dispatcher_patch_installed", {});
+      } catch (error) {
+        reportRendererEvent("thread_fast_dispatcher_patch_failed", { message: String(error) });
+        fastDispatcherPatchPromise = null;
+      }
+    });
   }
 
   function installScrollRestore() {
@@ -1343,33 +2065,6 @@
       });
     }, true);
     window.addEventListener?.("beforeunload", () => saveThreadScrollPosition("beforeunload"));
-    if (!window.__codexPilotHistoryPatched) {
-      window.__codexPilotHistoryPatched = true;
-      ["pushState", "replaceState"].forEach((method) => {
-        const original = history?.[method];
-        if (typeof original !== "function") return;
-        history[method] = function codexPilotPatchedHistory(...args) {
-          if (!isActiveBoot()) {
-            return original.apply(this, args);
-          }
-          saveThreadScrollPosition(`before_${method}`);
-          const result = original.apply(this, args);
-          setTimeout(() => handleThreadMaybeChanged(method), 0);
-          return result;
-        };
-      });
-      window.addEventListener?.("popstate", () => {
-        if (!isActiveBoot()) return;
-        saveThreadScrollPosition("before_popstate");
-        setTimeout(() => handleThreadMaybeChanged("popstate"), 0);
-      }, true);
-    }
-    if (typeof window.setInterval === "function") {
-      routeCheckTimer = window.setInterval(() => {
-        if (!isActiveBoot()) return;
-        handleThreadMaybeChanged("interval");
-      }, 650);
-    }
     reportRendererEvent("scroll_restore_ready", { session_id: activeScrollSessionId });
   }
 
@@ -1719,6 +2414,28 @@
       }
     });
 
+    const pill = document.createElement("div");
+    pill.className = "codex-pilot-pill";
+
+    const fastToggle = document.createElement("button");
+    fastToggle.className = "codex-pilot-fast-toggle";
+    fastToggle.type = "button";
+    fastToggle.dataset.mode = "standard";
+    fastToggle.dataset.source = "none";
+    fastToggle.title = "当前对话使用 Standard";
+    fastToggle.setAttribute("aria-label", "当前对话使用 Standard");
+    fastToggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>';
+    const fastLabel = document.createElement("span");
+    fastLabel.className = "codex-pilot-fast-label";
+    fastLabel.textContent = "";
+    fastToggle.appendChild(fastLabel);
+    fastToggle.addEventListener("click", (event) => {
+      stopRowActionEvent(event);
+      toggleCurrentServiceTierMode();
+    }, true);
+    fastToggleButton = fastToggle;
+    fastToggleLabel = fastLabel;
+
     const toggle = document.createElement("button");
     toggle.className = "codex-pilot-button";
     toggle.type = "button";
@@ -1733,15 +2450,21 @@
     });
 
     panel.append(title, exportShell, message);
-    root.append(panel, toggle);
+    pill.append(fastToggle, toggle);
+    root.append(panel, pill);
     document.body.appendChild(root);
+    refreshFastToggleUi();
     scheduleBackendStatusHeartbeat(root, message);
   }
 
   function startRefreshLoop() {
     if (enhancementSettings.inlineActions) refreshSessionActions();
+    installRouteChangeTracking();
     if (enhancementSettings.scrollRestore) installScrollRestore();
     if (enhancementSettings.timeline) refreshTimelineSoon();
+    installServiceTierDispatcherPatch();
+    installServiceTierTestApi();
+    refreshFastToggleUi();
     if (typeof MutationObserver === "function") {
       const observer = new MutationObserver(() => {
         if (!isActiveBoot()) {
@@ -1750,6 +2473,7 @@
         }
         if (enhancementSettings.inlineActions) refreshSessionActions();
         if (enhancementSettings.timeline) refreshTimelineSoon();
+        refreshFastToggleUi();
       });
       observer.observe(document.body, { childList: true, subtree: true });
     }
@@ -1758,6 +2482,12 @@
         if (!isActiveBoot()) return;
         if (enhancementSettings.inlineActions) refreshSessionActions();
         if (enhancementSettings.timeline) renderTimeline();
+        if (fastPendingBindStartedAt && Date.now() - fastPendingBindStartedAt > serviceTierDraftTtlMs) {
+          fastPendingBindStartedAt = 0;
+          clearServiceTierDraft("pending_bind_ttl");
+        }
+        refreshFastToggleUi();
+        installServiceTierDispatcherPatch();
       }, 1500);
     }
   }
