@@ -100,11 +100,6 @@ CodexPilot 会读取本机 `~/.codex/config.toml` 的当前 Provider，并读写
 - [功能说明](docs/features.md)：启动、会话维护、对话同步、诊断和本地数据说明。
 - [README 维护准则](docs/development/readme-guidelines.md)：项目首页的信息架构和文案规则。
 
-## 交流与支持
-
-如需交流使用问题、反馈异常或获取发布信息，可以加入微信交流群。
-
-<img width="313" height="481" alt="CodexPilot 微信交流群二维码" src="https://github.com/user-attachments/assets/ca69b9b2-64f9-461d-b81b-7f1a3b0eb6b9" />
 
 本项目链接并认可 [LINUX DO](https://linux.do/) 社区。欢迎在社区讨论帖中反馈问题、分享使用体验或提出改进建议。
 
