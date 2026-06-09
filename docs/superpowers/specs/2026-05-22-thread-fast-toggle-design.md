@@ -179,6 +179,12 @@ The renderer should refresh this decision on the same route and session-change
 signals already used by CodexPilot for other page-bound state where practical,
 rather than relying on a single one-shot read.
 
+URL-derived thread ids must use explicit session semantics. Query and hash
+parameters named `session`, `conversation`, or `thread` may carry Codex thread
+ids. Path parsing must only accept known thread-id shapes, or ids that follow an
+explicit `session`, `conversation`, or `thread` path segment. Ordinary Codex
+routes such as settings or archive pages must not be treated as thread ids.
+
 ### Write Toggle State
 
 When the user clicks the lightning icon:
@@ -226,15 +232,28 @@ occurred.
 For requests that belong to a `Fast` thread or a `Fast` new-conversation draft:
 
 - force `serviceTier = "priority"`.
+- if the original params already contain `service_tier`, keep that field in
+  sync with `serviceTier` so the request cannot carry conflicting service-tier
+  values.
 
 For requests that belong to a `Standard` override:
 
 - force `serviceTier = null` or remove the priority override so the request runs
   as standard.
+- if the original params already contain `service_tier`, clear it to the same
+  standard value.
 
 For requests with no override:
 
 - leave existing behavior untouched.
+
+The renderer dispatcher patch is part of the request-override contract. Every
+installed patch must record the boot id that owns it, the original dispatcher,
+and the patched dispatcher. Install and uninstall paths must check that owner
+after every asynchronous module load. A stale boot may not overwrite or restore
+a newer active boot's dispatcher patch. A currently active disabled boot may
+remove a previously registered CodexPilot patch so turning the enhancement off
+fully restores the upstream dispatcher.
 
 ### Draft Binding
 

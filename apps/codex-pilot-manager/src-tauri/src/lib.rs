@@ -307,6 +307,7 @@ mod tests {
             scroll_restore: true,
             plugin_entry_unlock: false,
             force_plugin_install: true,
+            fast_global_mode: false,
         };
 
         save_enhancement_settings_to_path(&path, &settings).unwrap();

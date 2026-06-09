@@ -113,6 +113,7 @@ const commandHandlers: Record<string, MockCommandHandler> = {
     scrollRestore: true,
     pluginEntryUnlock: true,
     forcePluginInstall: true,
+    fastGlobalMode: true,
   }),
   save_enhancement_settings: () => "预览模式：页面增强设置已保存，重新注入后生效。",
   sync_provider_sessions: () => "预览模式：Provider Sync 完成，目标 acme-relay，会话文件 18 个，数据库行 19 条。",

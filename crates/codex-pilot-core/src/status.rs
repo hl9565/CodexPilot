@@ -23,6 +23,14 @@ pub fn write_status(status: &BackendStatus) -> anyhow::Result<()> {
         .with_context(|| format!("failed to write {}", path.display()))
 }
 
+pub fn clear_status() -> anyhow::Result<()> {
+    let path = status_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))
+}
+
 pub fn read_status() -> anyhow::Result<Option<BackendStatus>> {
     let path = status_path();
     if !path.exists() {

@@ -5,8 +5,13 @@ pub(crate) async fn backend_status()
 -> Result<Option<codex_pilot_core::status::BackendStatus>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         let prefs = load_launch_preferences();
-        let helper_port = launch_options_from_preferences(&prefs).helper_port;
-        let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(helper_port);
+        let options = launch_options_from_preferences(&prefs);
+        // 仅以 helper 端口是否可达判定后端存活，刻意不看调试端口：Codex 在自更新重启、单实例接管，
+        // 或首屏加载完成后关闭 CDP 端口时，调试端口会短暂/持久消失，但后端仍然存活。这里与 launcher
+        // 的存活监控（以 Codex 进程为判据）和 launch_snapshot 的 Running 自愈（仅看 helper）保持一致，
+        // 避免状态标签在调试端口消失窗口里误报 idle 并反复删除状态文件。
+        let helper_reachable =
+            codex_pilot_core::ports::can_connect_loopback_port(options.helper_port);
         let status = codex_pilot_core::status::read_status().map_err(|error| error.to_string())?;
 
         if helper_reachable {
@@ -14,6 +19,15 @@ pub(crate) async fn backend_status()
                 status: "running".to_string(),
                 version: codex_pilot_core::version::VERSION.to_string(),
             }));
+        }
+
+        if status
+            .as_ref()
+            .map(|value| value.status == "running")
+            .unwrap_or(false)
+        {
+            let _ = codex_pilot_core::status::clear_status();
+            return Ok(None);
         }
 
         Ok(status)

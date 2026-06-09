@@ -31,6 +31,7 @@ export function LaunchView({
     scrollRestore: true,
     pluginEntryUnlock: true,
     forcePluginInstall: true,
+    fastGlobalMode: true,
   });
   const [saveMessage, setSaveMessage] = React.useState("");
   const [enhancementMessage, setEnhancementMessage] = React.useState("");
@@ -254,6 +255,13 @@ export function LaunchView({
               disabled={!enhancementSettings.enabled || enhancementSaving}
               label="特殊插件强制安装"
               onChange={(checked) => updateEnhancementSettings({ forcePluginInstall: checked })}
+            />
+            <SwitchRow
+              checked={enhancementSettings.fastGlobalMode}
+              description="所有对话默认使用 Fast（priority）服务档位；关闭后恢复按对话/草稿手动控制。"
+              disabled={!enhancementSettings.enabled || enhancementSaving}
+              label="全局 Fast"
+              onChange={(checked) => updateEnhancementSettings({ fastGlobalMode: checked })}
             />
           </div>
         </div>

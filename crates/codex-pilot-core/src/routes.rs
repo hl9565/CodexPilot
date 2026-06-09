@@ -118,7 +118,8 @@ fn enhancement_settings() -> Value {
             "inlineActions": parsed.get("inlineActions").and_then(Value::as_bool).unwrap_or(true),
             "scrollRestore": parsed.get("scrollRestore").and_then(Value::as_bool).unwrap_or(true),
             "pluginEntryUnlock": parsed.get("pluginEntryUnlock").and_then(Value::as_bool).unwrap_or(true),
-            "forcePluginInstall": parsed.get("forcePluginInstall").and_then(Value::as_bool).unwrap_or(true)
+            "forcePluginInstall": parsed.get("forcePluginInstall").and_then(Value::as_bool).unwrap_or(true),
+            "fastGlobalMode": parsed.get("fastGlobalMode").and_then(Value::as_bool).unwrap_or(true)
         }
     })
 }

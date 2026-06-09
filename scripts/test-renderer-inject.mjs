@@ -30,6 +30,21 @@ class MiniElement {
     this.clientHeight = 420;
     this._innerHTML = "";
     this._textContent = "";
+    this.classList = {
+      add: (...names) => {
+        const classes = new Set(this.className.split(/\s+/).filter(Boolean));
+        names.forEach((name) => classes.add(String(name)));
+        this.className = Array.from(classes).join(" ");
+      },
+      remove: (...names) => {
+        const removed = new Set(names.map(String));
+        this.className = this.className
+          .split(/\s+/)
+          .filter((name) => name && !removed.has(name))
+          .join(" ");
+      },
+      contains: (name) => this.className.split(/\s+/).includes(String(name))
+    };
   }
 
   setAttribute(name, value) {
@@ -37,10 +52,18 @@ class MiniElement {
     this.attributes.set(name, text);
     if (name === "id") this.id = text;
     if (name === "class") this.className = text;
+    if (name === "disabled") this.disabled = true;
   }
 
   getAttribute(name) {
     return this.attributes.get(name) ?? null;
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(name);
+    if (name === "id") this._id = "";
+    if (name === "class") this._className = "";
+    if (name === "disabled") this.disabled = false;
   }
 
   set id(value) {
@@ -279,27 +302,38 @@ function createFixture({
   url = "https://chatgpt.com/codex",
   delaySettingStorageImport = false,
   failSettingStorageImportOnce = false,
-  enhancementSettings = {}
+  enhancementSettings = {},
+  windowFastPatchMarker = "",
+  existingDocument = null,
+  sharedDispatcher = null,
+  sharedStorage = null,
+  sharedWindowState = {},
+  failSettingStorageImportAlways = false,
+  settingStorageExportName = "v",
+  includeDistractorSettingStorageExport = false,
+  exportDispatcherInstanceDirectly = false
 } = {}) {
-  const document = new MiniDocument();
+  const document = existingDocument || new MiniDocument();
   const selected = makeThreadRow("thread-selected-12345", "测试对话", true);
   const other = includeOther ? makeThreadRow("thread-other-12345", "其他对话", false) : null;
   const threadMessages = messages || [
     makeMessage({ text: "请帮我解释这段代码", offsetTop: 120 }),
     makeMessage({ text: "再帮我补一个测试", offsetTop: 760 })
   ];
-  document.body.append(...[selected.listItem, other?.listItem, ...threadMessages].filter(Boolean));
+  if (!existingDocument) {
+    document.body.append(...[selected.listItem, other?.listItem, ...threadMessages].filter(Boolean));
+  }
 
   const bridgeCalls = [];
   const navigationStateByCall = [];
   const confirmMessages = [];
   const intervals = [];
-  const storage = new Map();
+  const storage = sharedStorage || new Map();
   const mutationObservers = [];
   const navigationClicks = [];
   const timeoutQueue = [];
   const dispatchedMessages = [];
-  const dispatcher = {
+  const dispatcher = sharedDispatcher || {
     dispatchMessage(type, payload) {
       dispatchedMessages.push({ type, payload });
       return { type, payload };
@@ -307,33 +341,56 @@ function createFixture({
   };
   let releaseSettingStorageImport = null;
   let settingStorageImportStarted = 0;
-  const settingStorageModule = {
-    v: class FixtureDispatcher {
-      static getInstance() {
-        return dispatcher;
-      }
-
-      dispatchMessage() {}
+  class FixtureDispatcher {
+    static getInstance() {
+      return dispatcher;
     }
+
+    dispatchMessage() {}
+  }
+  const settingStorageModule = {
+    // 真实 vscode-api 同时导出 dispatcher 类（getInstance）与单例实例（自带 dispatchMessage）。
+    // exportDispatcherInstanceDirectly 用于覆盖「解析器直查实例」这条生产路径。
+    [settingStorageExportName]: exportDispatcherInstanceDirectly ? dispatcher : FixtureDispatcher
   };
+  let distractorGetInstanceCalled = false;
+  if (includeDistractorSettingStorageExport) {
+    settingStorageModule.a = class FixtureSettingsSingleton {
+      static getInstance() {
+        distractorGetInstanceCalled = true;
+        return {};
+      }
+    };
+  }
   class FixtureMutationObserver {
     constructor(callback) {
       this.callback = callback;
+      this.connected = false;
       mutationObservers.push(this);
     }
 
-    observe() {}
+    observe() {
+      this.connected = true;
+    }
+
+    disconnect() {
+      this.connected = false;
+    }
 
     trigger() {
-      this.callback([]);
+      // 真实 observer 在 disconnect 期间不会派发回调；模型保持一致，以便覆盖
+      // “跑处理器前先 disconnect、跑完再 observe” 的自反馈防护逻辑。
+      if (!this.connected) return;
+      this.callback([], this);
     }
   }
+  const windowObject = sharedWindowState;
   const context = {
     console: { info() {} },
     performance: {
       getEntriesByType(type) {
         return type === "resource"
-          ? [{ name: "https://chatgpt.com/assets/setting-storage-fixture.js" }]
+          ? [{ name: "https://chatgpt.com/assets/vscode-api-fixture.js" }]
           : [];
       }
     },
@@ -349,11 +406,17 @@ function createFixture({
       pushState() {},
       replaceState() {}
     },
-    window: {
+    window: windowObject
+  };
+  Object.assign(windowObject, {
       __CODEX_PILOT_TEST__: true,
+      __codexPilotFastDispatcherPatchInstalled: windowFastPatchMarker || windowObject.__codexPilotFastDispatcherPatchInstalled,
       __CODEX_PILOT_TEST_LOAD_CODEX_APP_MODULE__(namePart) {
-        assert.equal(namePart, "setting-storage-", "Fast dispatcher patch 应加载 Codex setting storage 模块");
+        assert.equal(namePart, "vscode-api-", "Fast dispatcher patch 应加载 Codex vscode-api 模块（dispatcher 单例所在 chunk）");
         settingStorageImportStarted += 1;
+        if (failSettingStorageImportAlways) {
+          return Promise.reject(new Error("setting storage unavailable"));
+        }
         if (failSettingStorageImportOnce && settingStorageImportStarted === 1) {
           return Promise.reject(new Error("setting storage not ready"));
         }
@@ -470,8 +533,7 @@ function createFixture({
         }
         return Promise.resolve({ status: "ok", message: "后端已连接" });
       }
-    }
-  };
+  });
   selected.row.addEventListener("click", () => {
     selected.row.setAttribute("aria-current", "page");
     if (other?.row) other.row.attributes.delete("aria-current");
@@ -506,6 +568,7 @@ function createFixture({
     other,
     releaseSettingStorageImport: () => releaseSettingStorageImport?.(),
     selected,
+    distractorGetInstanceCalled: () => distractorGetInstanceCalled,
     settingStorageImportStarted: () => settingStorageImportStarted,
     storage,
     timeoutQueue
@@ -587,10 +650,20 @@ async function flushAsyncWork() {
   const rowActionGroup = selected.row.querySelector(".codex-pilot-row-actions");
   assert.ok(rowActionGroup, "应创建独立的会话行操作组");
   assert.equal(rowActionGroup.children.length, 1, "会话行操作组只包含删除按钮");
+  const selectedTitle = selected.row.querySelector("[data-thread-title]");
+  assert.ok(
+    selectedTitle.classList.contains("codex-pilot-row-title-mask-target"),
+    "应给实际标题节点标记 CodexPilot 遮罩 class"
+  );
   const styleText = document.getElementById("codex-pilot-style").textContent;
   const rowActionsStyle = styleText.match(/\.codex-pilot-row-actions\s*\{[^}]+\}/)?.[0] || "";
   assert.match(rowActionsStyle, /left:\s*8px;/, "会话行操作组应固定在标题左侧");
   assert.doesNotMatch(rowActionsStyle, /right:\s*\d+px;/, "会话行操作组不应同时保留右侧定位");
+  assert.match(
+    styleText,
+    /\.codex-pilot-row-title-mask-target/,
+    "标题遮罩 CSS 应使用 CodexPilot 自己标记的标题节点"
+  );
   assert.match(
     styleText,
     /mask-image:\s*linear-gradient\(90deg,\s*transparent 0,\s*transparent 42px,\s*#000 58px/,
@@ -725,23 +798,62 @@ async function flushAsyncWork() {
   assert.ok(fastToggle, "Pilot pill 应显示 Fast 闪电按钮");
   assert.equal(fastToggle.dataset.patchStatus, "ready", "dispatcher patch 安装成功后 Fast 才可用");
   assert.equal(fastToggle.disabled, false, "dispatcher patch ready 后 Fast 按钮应可点击");
+  assert.equal(fastToggle.dataset.source, "global", "Pilot 启用时 Fast 应显示为全局生效");
   const openBeforeFastClick = root.dataset.open;
   await fastToggle.click();
   assert.equal(root.dataset.open, openBeforeFastClick, "点击 Fast 不能打开 Pilot 面板");
   assert.notEqual(root.dataset.open, "true", "点击 Fast 后 Pilot 面板不应处于打开状态");
-  assert.equal(fastToggle.dataset.mode, "fast", "新对话 draft 应显示 Fast");
+  assert.equal(fastToggle.dataset.mode, "fast", "全局 Fast 应显示 Fast");
 
   const start = api.override({
     type: "send-cli-request-for-host",
     method: "thread/start",
     params: { prompt: "hello" }
   });
-  assert.equal(start.params.serviceTier, "priority", "Fast draft 应让新对话首请求使用 priority");
+  assert.equal(start.params.serviceTier, "priority", "全局 Fast 应让新对话首请求使用 priority");
   const store = api.state();
-  assert.equal(store.draft.pendingBind, true, "draft-backed 请求后应进入待绑定状态");
-  assert.ok(store.draft.startToken, "待绑定 draft 应记录 start token");
+  assert.equal(store.draft, null, "全局 Fast 不应创建或绑定 draft 状态");
   await panelToggle.click();
   assert.equal(root.dataset.open, "true", "Pilot 面板按钮仍应独立工作");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex/thread-selected-12345" });
+  await flushAsyncWork();
+  const globalStartPayload = {
+    method: "thread/start",
+    params: { prompt: "new conversation without draft" }
+  };
+  fixture.dispatcher.dispatchMessage("send-cli-request-for-host", globalStartPayload);
+  assert.equal(
+    fixture.dispatchedMessages[0].payload.params.serviceTier,
+    "priority",
+    "全局 Fast 下支持的 thread/start 必须改写为 priority"
+  );
+
+  const unknownPayload = { value: 42 };
+  fixture.dispatcher.dispatchMessage("unknown-message", unknownPayload);
+  assert.equal(
+    fixture.dispatchedMessages[1].payload,
+    unknownPayload,
+    "未知消息必须透传原始 payload 对象"
+  );
+
+  fixture.dispatcher.dispatchMessage("unknown-empty", undefined);
+  assert.equal(
+    fixture.dispatchedMessages[2].payload,
+    undefined,
+    "undefined payload 未命中改写时不能被重组成空对象"
+  );
+
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.setDraft("fast");
+  fixture.dispatcher.dispatchMessage("start-conversation", undefined);
+  assert.equal(
+    fixture.dispatchedMessages[3].payload,
+    undefined,
+    "全局 Fast 也不能凭空把 undefined start-conversation payload 改成对象"
+  );
 }
 
 {
@@ -756,13 +868,13 @@ async function flushAsyncWork() {
     params: { prompt: "hello" }
   });
   fixture.context.window.location.href = "https://chatgpt.com/codex/thread-selected-12345";
-  assert.equal(api.bind("test_old_thread", "thread-selected-12345"), false, "draft 不应绑定到发起前已存在的旧 thread");
-  assert.ok(api.state().draft, "误入旧 thread 时 draft 应保留等待真正新 thread");
+  assert.equal(api.bind("test_old_thread", "thread-selected-12345"), false, "全局 Fast 不依赖 draft 绑定旧 thread");
+  assert.equal(api.state().draft, null, "全局 Fast 请求后不应保留 draft");
 
   fixture.context.window.location.href = "https://chatgpt.com/codex/thread-new-98765";
-  assert.equal(api.bind("test_new_thread", "thread-new-98765"), true, "draft 应绑定到新出现的 thread id");
-  assert.equal(api.state().entries["thread-new-98765"].mode, "fast", "绑定后新 thread 应保存 Fast 覆盖");
-  assert.equal(api.state().draft, null, "成功绑定后应清理 draft");
+  assert.equal(api.bind("test_new_thread", "thread-new-98765"), false, "全局 Fast 不需要给新 thread 写入 override");
+  assert.equal(api.state().entries["thread-new-98765"], undefined, "全局 Fast 不应污染 per-thread override 表");
+  assert.equal(api.state().draft, null, "全局 Fast 始终不保留 draft");
 }
 
 {
@@ -776,21 +888,19 @@ async function flushAsyncWork() {
     method: "thread/start",
     params: { prompt: "first" }
   });
-  const firstDraft = api.state().draft;
-  assert.equal(firstDraft.existingSessionIds.includes("thread-new-98765"), false, "首个 start 前快照不包含新 thread");
+  assert.equal(api.state().draft, null, "全局 Fast 首个 start 不应创建 pending draft");
 
   const newThread = makeThreadRow("thread-new-98765", "新对话", false);
   fixture.document.body.append(newThread.listItem);
-  api.override({
+  const prewarm = api.override({
     type: "thread-prewarm-start",
     request: {
       params: { prompt: "prewarm after row appears" }
     }
   });
-  const secondDraft = api.state().draft;
-  assert.equal(secondDraft.startToken, firstDraft.startToken, "pending draft 的 start token 不应被后续 envelope 覆盖");
-  assert.equal(secondDraft.existingSessionIds.includes("thread-new-98765"), false, "pending draft 的旧 thread 快照不应被后续 envelope 污染");
-  assert.equal(api.bind("test_new_thread_after_second_start", "thread-new-98765"), true, "新 thread 出现在侧边栏后仍应能绑定 draft");
+  assert.equal(prewarm.request.params.serviceTier, "priority", "全局 Fast 下 prewarm thread/start 仍应 priority");
+  assert.equal(api.state().draft, null, "后续 prewarm 也不应创建 pending draft");
+  assert.equal(api.bind("test_new_thread_after_second_start", "thread-new-98765"), false, "全局 Fast 不需要等新 thread 出现在侧边栏后绑定");
 }
 
 {
@@ -816,7 +926,64 @@ async function flushAsyncWork() {
       params: { threadId: "thread-selected-12345", serviceTier: "priority" }
     }
   });
-  assert.equal(resume.request.params.serviceTier, null, "显式 Standard 覆盖应清除 priority");
+  assert.equal(resume.request.params.serviceTier, "priority", "全局 Fast 应覆盖显式 Standard thread override");
+
+  api.setThread("thread-selected-12345", "fast");
+  const snakeCaseFast = api.override({
+    type: "send-cli-request-for-host",
+    method: "turn/start",
+    params: { threadId: "thread-selected-12345", service_tier: null }
+  });
+  assert.equal(snakeCaseFast.params.serviceTier, "priority", "Fast 覆盖应设置 camelCase serviceTier");
+  assert.equal(snakeCaseFast.params.service_tier, "priority", "原请求存在 service_tier 时必须同步设置 snake_case 字段");
+
+  api.setThread("thread-selected-12345", "standard");
+  const snakeCaseStandard = api.override({
+    type: "send-cli-request-for-host",
+    method: "turn/start",
+    params: { threadId: "thread-selected-12345", serviceTier: "priority", service_tier: "priority" }
+  });
+  assert.equal(snakeCaseStandard.params.serviceTier, "priority", "全局 Fast 应覆盖 Standard camelCase priority");
+  assert.equal(snakeCaseStandard.params.service_tier, "priority", "全局 Fast 应覆盖 Standard snake_case priority");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+
+  api.clear();
+  api.setDraft("fast");
+  const directStart = api.override({
+    type: "start-conversation",
+    prompt: "direct start"
+  });
+  assert.equal(directStart.serviceTier, "priority", "start-conversation 应消费 Fast draft 并设置 priority");
+
+  api.clear();
+  api.setDraft("fast");
+  const prewarmForHost = api.override({
+    type: "prewarm-thread-start-for-host",
+    params: { prompt: "prewarm host" }
+  });
+  assert.equal(prewarmForHost.params.serviceTier, "priority", "prewarm-thread-start-for-host 应覆盖 thread/start params");
+
+  api.clear();
+  api.setDraft("fast");
+  const startThreadForHost = api.override({
+    type: "start-thread-for-host",
+    prompt: "start host"
+  });
+  assert.equal(startThreadForHost.serviceTier, "priority", "start-thread-for-host 应覆盖自身 payload");
+
+  api.clear();
+  api.setThread("thread-selected-12345", "fast");
+  const startTurnForHost = api.override({
+    type: "start-turn-for-host",
+    conversationId: "thread-selected-12345",
+    params: { input: "continue" }
+  });
+  assert.equal(startTurnForHost.params.serviceTier, "priority", "start-turn-for-host 应覆盖 turn/start params");
 }
 
 {
@@ -830,7 +997,7 @@ async function flushAsyncWork() {
     method: "thread/start",
     params: { prompt: "new conversation" }
   });
-  assert.equal(start.params.serviceTier, undefined, "thread/start 不应回退到当前旧 thread 的 Fast 覆盖");
+  assert.equal(start.params.serviceTier, "priority", "全局 Fast 下没有 threadId 的 thread/start 也应 priority");
 
   api.override({ type: "mcp-request", request: null });
   assert.ok(
@@ -847,17 +1014,60 @@ async function flushAsyncWork() {
   api.setDraft("fast");
   fixture.context.window.location.href = "https://chatgpt.com/codex/thread-selected-12345";
   const state = api.uiState();
-  assert.equal(state.source, "none", "已有会话没有 override 时不应显示新对话 draft 状态");
+  assert.equal(state.source, "global", "已有会话应显示全局 Fast 状态");
   assert.equal(state.sessionId, "thread-selected-12345", "已有会话 UI 状态应保留完整当前 thread id");
-  assert.equal(state.mode, "standard", "已有会话没有 override 时应显示 Standard");
+  assert.equal(state.mode, "fast", "已有会话应显示 Fast");
 
   const start = api.override({
     type: "send-cli-request-for-host",
     method: "thread/start",
     params: { threadId: "thread-selected-12345", prompt: "existing thread start" }
   });
-  assert.equal(start.params.serviceTier, undefined, "带已有 threadId 的 thread/start 不应消费 draft");
-  assert.ok(api.state().draft, "已有 threadId 请求不能清理下一条新对话 draft");
+  assert.equal(start.params.serviceTier, "priority", "全局 Fast 下带已有 threadId 的 thread/start 也应使用 priority");
+  assert.ok(api.state().draft, "测试手工写入的 legacy draft 不应被已有 threadId 请求清理");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex/settings" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  const state = api.uiState();
+  assert.equal(state.sessionId, "", "普通 Codex 子路由不能被识别成 thread id");
+  assert.equal(state.source, "global", "普通 Codex 子路由也应显示全局 Fast 状态");
+  await fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  assert.equal(api.state().entries.settings, undefined, "普通路由名不能写入 Fast thread override");
+  assert.equal(api.state().draft, null, "全局 Fast 点击不应创建普通子路由 draft");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex/thread/thread-explicit-12345" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  const fastToggle = fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle");
+  await fastToggle.click();
+  assert.equal(
+    api.uiState().sessionId,
+    "thread-explicit-12345",
+    "明确 thread 路径上下文后的 id 仍应被识别"
+  );
+  assert.equal(api.state().entries["thread-explicit-12345"], undefined, "全局 Fast 点击不应写入 per-thread override");
+}
+
+{
+  const fixture = createFixture({ url: "https://chatgpt.com/codex?thread=thread-query-12345" });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  const fastToggle = fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle");
+  await fastToggle.click();
+  assert.equal(
+    api.uiState().sessionId,
+    "thread-query-12345",
+    "显式 query thread 参数仍应被识别"
+  );
+  assert.equal(api.state().entries["thread-query-12345"], undefined, "全局 Fast 点击不应写入 query thread override");
 }
 
 {
@@ -867,7 +1077,8 @@ async function flushAsyncWork() {
   api.clear();
   const fastToggle = fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle");
   await fastToggle.click();
-  assert.equal(api.state().entries["thread-selected-12345"].mode, "fast", "URL path thread id 应与 sidebar/request key 保持一致");
+  assert.equal(api.uiState().sessionId, "thread-selected-12345", "URL path thread id 应与 sidebar/request key 保持一致");
+  assert.equal(api.state().entries["thread-selected-12345"], undefined, "全局 Fast 点击不应写入 URL path thread override");
   const turn = api.override({
     type: "send-cli-request-for-host",
     method: "turn/start",
@@ -896,18 +1107,23 @@ async function flushAsyncWork() {
   assert.ok(routeInterval, "Fast draft 绑定应安装独立 route/session 监听");
   routeInterval.callback();
   await flushAsyncWork();
-  assert.equal(api.state().entries["thread-new-98765"].mode, "fast", "scrollRestore 关闭时 draft 仍应绑定到新 thread");
-  assert.equal(api.state().draft, null, "绑定成功后应清理 draft");
+  assert.equal(api.state().entries["thread-new-98765"], undefined, "scrollRestore 关闭时全局 Fast 不应绑定新 thread override");
+  assert.equal(api.state().draft, null, "全局 Fast 不应产生 draft");
 }
 
 {
   const fixture = createFixture({ delaySettingStorageImport: true });
   await flushAsyncWork();
   const fastToggle = fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle");
-  assert.equal(fastToggle.disabled, true, "dispatcher patch 加载中 Fast 按钮应禁用");
+  assert.equal(fastToggle.disabled, false, "dispatcher patch 加载中 Fast 按钮仍应可点击以展示反馈");
+  assert.equal(fastToggle.getAttribute("aria-disabled"), "true", "dispatcher patch 加载中 Fast 按钮应标记为不可用");
   await fastToggle.click();
-  assert.equal(fastToggle.dataset.mode, "standard", "patch 未 ready 前点击不能创建 Fast draft");
+  assert.equal(fastToggle.dataset.mode, "fast", "patch 未 ready 前仍显示全局 Fast 意图");
   assert.equal(fixture.context.window.__CODEX_PILOT_FAST_TEST__.state().draft, null, "patch 未 ready 前不能写入 draft 状态");
+  assert.ok(
+    fixture.bridgeCalls.some((call) => call.path === "/diagnostics/report" && call.payload?.event === "thread_fast_toggle_blocked"),
+    "patch 未 ready 前点击应写入 blocked 诊断"
+  );
   const installInterval = fixture.intervals.find((item) => item.delay === 1500);
   assert.ok(installInterval, "应启动刷新 interval");
   installInterval.callback();
@@ -929,7 +1145,8 @@ async function flushAsyncWork() {
   await flushAsyncWork();
   const root = fixture.document.getElementById("codex-pilot-root");
   const fastToggle = root.querySelector(".codex-pilot-fast-toggle");
-  assert.equal(fastToggle.disabled, true, "dispatcher patch 首次失败后 Fast 按钮应保持不可用");
+  assert.equal(fastToggle.disabled, false, "dispatcher patch 首次失败后 Fast 按钮仍应可点击以展示反馈");
+  assert.equal(fastToggle.getAttribute("aria-disabled"), "true", "dispatcher patch 首次失败后 Fast 按钮应标记不可用");
   assert.equal(fastToggle.dataset.patchStatus, "unavailable", "首次加载失败应进入 unavailable 状态");
   assert.equal(fixture.settingStorageImportStarted(), 1, "首次安装应尝试加载一次 dispatcher module");
 
@@ -940,6 +1157,7 @@ async function flushAsyncWork() {
   assert.equal(fixture.settingStorageImportStarted(), 2, "失败后的下一轮应重新加载 dispatcher module");
   assert.equal(fastToggle.dataset.patchStatus, "ready", "dispatcher patch 重试成功后 Fast 应可用");
   assert.equal(fastToggle.disabled, false, "dispatcher patch 重试成功后按钮应启用");
+  assert.equal(fastToggle.getAttribute("aria-disabled"), null, "dispatcher patch 重试成功后应移除 aria-disabled");
 
   await fastToggle.click();
   fixture.dispatcher.dispatchMessage("send-cli-request-for-host", {
@@ -950,6 +1168,293 @@ async function flushAsyncWork() {
     fixture.dispatchedMessages[0].payload.params.serviceTier,
     "priority",
     "dispatcher patch 重试成功后 Fast draft 应改写首请求"
+  );
+}
+
+{
+  const fixture = createFixture({ windowFastPatchMarker: "3" });
+  await flushAsyncWork();
+  const root = fixture.document.getElementById("codex-pilot-root");
+  const fastToggle = root.querySelector(".codex-pilot-fast-toggle");
+  assert.equal(fixture.settingStorageImportStarted(), 1, "window patch 标记不能跳过真实 dispatcher 检查");
+  assert.equal(fastToggle.dataset.patchStatus, "ready", "真实 dispatcher 安装后才能显示 ready");
+
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  await fastToggle.click();
+  fixture.dispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "hello after stale marker" }
+  });
+  assert.equal(
+    fixture.dispatchedMessages[0].payload.params.serviceTier,
+    "priority",
+    "window 标记存在但实例未安装时仍应安装当前 dispatcher wrapper"
+  );
+}
+
+{
+  const fixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    settingStorageExportName: "Qx",
+    includeDistractorSettingStorageExport: true
+  });
+  await flushAsyncWork();
+  const fastToggle = fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle");
+  assert.equal(fastToggle.dataset.patchStatus, "ready", "dispatcher resolver 不应依赖固定混淆导出名");
+  assert.equal(
+    fixture.distractorGetInstanceCalled(),
+    false,
+    "dispatcher resolver 不能调用看起来不像 dispatcher 的 getInstance 导出"
+  );
+  fixture.dispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "alternate export" }
+  });
+  assert.equal(
+    fixture.dispatchedMessages[0].payload.params.serviceTier,
+    "priority",
+    "非 v 导出的 dispatcher 仍应被 patch 并应用全局 Fast"
+  );
+}
+
+{
+  // 生产路径：Codex 26.x 的 vscode-api 把 dispatcher 以单例实例（自带 dispatchMessage）直接导出，
+  // 解析器第一轮直查即命中，且不应触碰任何 getInstance 工厂（避免实例化无关单例的副作用）。
+  const fixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    settingStorageExportName: "f",
+    exportDispatcherInstanceDirectly: true,
+    includeDistractorSettingStorageExport: true
+  });
+  await flushAsyncWork();
+  const fastToggle = fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle");
+  assert.equal(fastToggle.dataset.patchStatus, "ready", "dispatcher 以单例实例直接导出时也应解析成功");
+  assert.equal(
+    fixture.distractorGetInstanceCalled(),
+    false,
+    "直查命中实例后不应再调用任何 getInstance"
+  );
+  fixture.dispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "instance export" }
+  });
+  assert.equal(
+    fixture.dispatchedMessages[0].payload.params.serviceTier,
+    "priority",
+    "实例导出的 dispatcher 同样应被 patch 并应用全局 Fast"
+  );
+}
+
+{
+  const staleDocument = new MiniDocument();
+  const staleStyle = staleDocument.createElement("style");
+  staleStyle.id = "codex-pilot-style";
+  staleStyle.textContent = "[data-codex-pilot-row='true']:hover [data-thread-title] { opacity: 0.5; }";
+  staleDocument.head.appendChild(staleStyle);
+  const fixture = createFixture({ existingDocument: staleDocument });
+  await flushAsyncWork();
+  const styleText = fixture.document.getElementById("codex-pilot-style").textContent;
+  assert.match(styleText, /\.codex-pilot-row-title-mask-target/, "重复注入时应覆盖旧 style 内容");
+  assert.doesNotMatch(styleText, /\[data-thread-title\]\s*\{ opacity/, "旧 style 内容不能残留为生效样式");
+}
+
+{
+  const sharedDispatcherMessages = [];
+  const sharedDispatcher = {
+    dispatchMessage(type, payload) {
+      sharedDispatcherMessages.push({ type, payload });
+      return { type, payload };
+    }
+  };
+  const sharedStorage = new Map();
+  const sharedWindowState = {};
+  const enabledFixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    sharedDispatcher,
+    sharedStorage,
+    sharedWindowState
+  });
+  await flushAsyncWork();
+  const api = enabledFixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  await enabledFixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  sharedDispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "enabled fast" }
+  });
+  assert.equal(sharedDispatcherMessages[0].payload.params.serviceTier, "priority", "启用时 Fast wrapper 应改写请求");
+
+  createFixture({
+    existingDocument: enabledFixture.document,
+    enhancementSettings: { enabled: false },
+    sharedDispatcher,
+    sharedStorage,
+    sharedWindowState,
+    failSettingStorageImportAlways: true
+  });
+  await flushAsyncWork();
+  sharedDispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "disabled fast" }
+  });
+  assert.equal(
+    sharedDispatcherMessages[1].payload.params.serviceTier,
+    undefined,
+    "增强关闭后必须通过已登记 dispatcher 恢复原始 dispatch，不能依赖重新 import 模块"
+  );
+}
+
+{
+  const sharedDispatcherMessages = [];
+  const sharedDispatcher = {
+    dispatchMessage(type, payload) {
+      sharedDispatcherMessages.push({ type, payload });
+      return { type, payload };
+    }
+  };
+  const sharedStorage = new Map();
+  const sharedWindowState = {};
+  const disabledFixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    delaySettingStorageImport: true,
+    enhancementSettings: { enabled: false },
+    sharedDispatcher,
+    sharedStorage,
+    sharedWindowState
+  });
+  await flushAsyncWork();
+  assert.equal(disabledFixture.settingStorageImportStarted(), 1, "增强关闭时应尝试卸载 dispatcher patch");
+
+  const activeFixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    sharedDispatcher,
+    sharedStorage,
+    sharedWindowState
+  });
+  await flushAsyncWork();
+  const activeApi = activeFixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  activeApi.clear();
+  await activeFixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  sharedDispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "active boot before stale disabled release" }
+  });
+  assert.equal(
+    sharedDispatcherMessages[0].payload.params.serviceTier,
+    "priority",
+    "新 boot 安装成功后应能改写 Fast 请求"
+  );
+  const activeBootId = sharedWindowState.__CODEX_PILOT_BOOT_ID__;
+
+  disabledFixture.releaseSettingStorageImport();
+  await flushAsyncWork();
+  activeApi.clear();
+  await activeFixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  sharedDispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "active boot after stale disabled release" }
+  });
+  assert.equal(
+    sharedDispatcherMessages[1].payload.params.serviceTier,
+    "priority",
+    "旧 disabled boot 的延迟卸载完成后不能恢复掉新 boot wrapper"
+  );
+  assert.equal(
+    sharedDispatcher.__codexPilotFastPatchOwnerBootId,
+    activeBootId,
+    "旧 disabled boot 不能夺走或清空新 boot 的 dispatcher patch owner"
+  );
+}
+
+{
+  const sharedDispatcherMessages = [];
+  const sharedDispatcher = {
+    dispatchMessage(type, payload) {
+      sharedDispatcherMessages.push({ type, payload });
+      return { type, payload };
+    }
+  };
+  const sharedStorage = new Map();
+  const sharedWindowState = {};
+  const staleFixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    delaySettingStorageImport: true,
+    sharedDispatcher,
+    sharedStorage,
+    sharedWindowState
+  });
+  await flushAsyncWork();
+
+  const activeFixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    sharedDispatcher,
+    sharedStorage,
+    sharedWindowState
+  });
+  await flushAsyncWork();
+  const activeApi = activeFixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  activeApi.clear();
+  await activeFixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  sharedDispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "active boot before stale release" }
+  });
+  assert.equal(
+    sharedDispatcherMessages[0].payload.params.serviceTier,
+    "priority",
+    "新 boot 安装成功后应能改写 Fast 请求"
+  );
+
+  staleFixture.releaseSettingStorageImport();
+  await flushAsyncWork();
+  activeApi.clear();
+  await activeFixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  sharedDispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "active boot after stale release" }
+  });
+  assert.equal(
+    sharedDispatcherMessages[1].payload.params.serviceTier,
+    "priority",
+    "旧 boot 的延迟 dispatcher 安装完成后不能覆盖新 boot wrapper"
+  );
+  assert.equal(
+    sharedDispatcher.__codexPilotFastPatchOwnerBootId,
+    sharedWindowState.__CODEX_PILOT_BOOT_ID__,
+    "dispatcher patch owner 必须保持为当前 active boot"
+  );
+}
+
+{
+  const sharedDispatcherMessages = [];
+  const sharedDispatcher = {
+    dispatchMessage(type, payload) {
+      sharedDispatcherMessages.push({ type, payload });
+      return { type, payload };
+    },
+    __codexPilotOriginalDispatchMessage() {
+      throw new Error("stale original dispatch must be ignored");
+    },
+    __codexPilotFastPatchVersion: "3",
+    __codexPilotFastPatchOwnerBootId: "stale-boot"
+  };
+  const fixture = createFixture({
+    url: "https://chatgpt.com/codex",
+    sharedDispatcher
+  });
+  await flushAsyncWork();
+  const api = fixture.context.window.__CODEX_PILOT_FAST_TEST__;
+  api.clear();
+  await fixture.document.getElementById("codex-pilot-root").querySelector(".codex-pilot-fast-toggle").click();
+  sharedDispatcher.dispatchMessage("send-cli-request-for-host", {
+    method: "thread/start",
+    params: { prompt: "stale metadata" }
+  });
+  assert.equal(
+    sharedDispatcherMessages[0].payload.params.serviceTier,
+    "priority",
+    "dispatcher 上的陈旧 patch metadata 不能让新安装链到旧 wrapper"
   );
 }
 

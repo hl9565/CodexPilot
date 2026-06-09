@@ -84,16 +84,16 @@ session-row inline delete.
 
 Manual verification should cover:
 
-- rows with Codex native trailing controls no longer show Pilot delete/export
-  directly on top of them;
+- rows with Codex native trailing controls no longer show Pilot delete directly
+  on top of them;
 - hovering a row reveals the direct delete button without an extra trigger;
 - the title fade leaves readable space for the shifted delete button;
 - delete still invokes the same flow as before.
 
 ## Acceptance Criteria
 
-- Normal session rows no longer place the direct two-button cluster on top of
-  Codex native controls.
+- Normal session rows no longer place the direct delete button on top of Codex
+  native controls.
 - Delete remains directly clickable from the row.
 - The delete button is visually shifted to the row's left side with matching
   title masking.

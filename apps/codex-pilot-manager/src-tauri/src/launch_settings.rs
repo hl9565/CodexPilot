@@ -28,6 +28,8 @@ pub(crate) struct EnhancementSettings {
     pub(crate) plugin_entry_unlock: bool,
     #[serde(default = "default_true")]
     pub(crate) force_plugin_install: bool,
+    #[serde(default = "default_true")]
+    pub(crate) fast_global_mode: bool,
 }
 
 impl Default for EnhancementSettings {
@@ -39,6 +41,7 @@ impl Default for EnhancementSettings {
             scroll_restore: true,
             plugin_entry_unlock: true,
             force_plugin_install: true,
+            fast_global_mode: true,
         }
     }
 }
@@ -186,7 +189,10 @@ pub(crate) fn build_codex_command_preview(app_dir: &Path, debug_port: u16) -> Ve
     }
 }
 
-pub(crate) fn append_launcher_args(command: &mut std::process::Command, prefs: &LaunchPreferences) {
+pub(crate) fn append_tokio_launcher_args(
+    command: &mut tokio::process::Command,
+    prefs: &LaunchPreferences,
+) {
     if !prefs.app_path.is_empty() {
         command.arg("--app-path").arg(&prefs.app_path);
     }

@@ -6,6 +6,7 @@ use crate::commands::launch_helpers::{
     launch_action_detail, launch_action_kind, launch_action_label, request_codex_quit,
     with_codex_process_cache_mut, with_launch_state_mut,
 };
+use tokio::io::AsyncReadExt;
 
 fn emit_launch_state(app: &tauri::AppHandle, new_state: &LaunchState) {
     use tauri::Emitter;
@@ -45,6 +46,7 @@ pub(crate) fn resolve_launcher_path() -> Result<std::path::PathBuf, String> {
 #[tauri::command]
 pub(crate) async fn launch_snapshot(
     state: tauri::State<'_, ManagerState>,
+    app: tauri::AppHandle,
 ) -> Result<LaunchSnapshot, String> {
     let prefs = load_launch_preferences();
     let options = launch_options_from_preferences(&prefs);
@@ -58,16 +60,23 @@ pub(crate) async fn launch_snapshot(
     let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(options.helper_port);
     let debug_reachable = codex_pilot_core::ports::can_connect_loopback_port(options.debug_port);
 
-    // Self-heal：若持久化状态停留在 Running 但 helper 端口已不可达（例如 Codex 已退出），降级为 Idle，
-    // 让 action_kind 重新回到“启动 Codex”。
+    // Self-heal：若状态停留在 Running/Launching 但 helper 和调试端口都不可达，说明后端已退出或启动失败。
+    // 这里主动降级并发事件，避免 UI 只靠下一轮 polling 感知状态机变化。
+    let mut healed_to_idle = false;
     let current = {
         let mut guard = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
-        if matches!(*guard, LaunchState::Running) && !helper_reachable {
+        if (matches!(*guard, LaunchState::Running) && !helper_reachable)
+            || (matches!(*guard, LaunchState::Launching) && !helper_reachable && !debug_reachable)
+        {
             *guard = LaunchState::Idle;
             set_cached_codex_process_running(&state, false);
+            healed_to_idle = true;
         }
         guard.clone()
     };
+    if healed_to_idle {
+        emit_launch_state(&app, &LaunchState::Idle);
+    }
 
     let manager_running = matches!(current, LaunchState::Running);
     let codex_running = if helper_reachable {
@@ -320,20 +329,24 @@ async fn spawn_launcher(
             return Err(message);
         }
     };
-    let mut command = codex_pilot_core::windows_integration::std_command(&launcher);
-    append_launcher_args(&mut command, prefs);
-    command.stdout(Stdio::null()).stderr(Stdio::null());
-    if let Err(error) = command.spawn() {
-        let message = format!("启动 CodexPilot 失败：{error}");
-        with_launch_state_mut(state, |current| {
-            *current = LaunchState::Failed(message.clone());
-        });
-        emit_launch_state(app, &LaunchState::Failed(message.clone()));
-        return Err(message);
-    }
+    let mut command = codex_pilot_core::windows_integration::tokio_command(&launcher);
+    append_tokio_launcher_args(&mut command, prefs);
+    command.stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = match codex_pilot_core::windows_integration::spawn_hidden(&mut command) {
+        Ok(child) => child,
+        Err(error) => {
+            let message = format!("启动 CodexPilot 失败：{error}");
+            with_launch_state_mut(state, |current| {
+                *current = LaunchState::Failed(message.clone());
+            });
+            emit_launch_state(app, &LaunchState::Failed(message.clone()));
+            return Err(message);
+        }
+    };
+    let mut stderr = child.stderr.take();
 
     clear_backend_status_file();
-    match wait_for_backend_launch(prefs.helper_port).await {
+    match wait_for_backend_launch(prefs.helper_port, &mut child, stderr.as_mut()).await {
         Ok(()) => {
             {
                 let mut current = state.launch_state.lock().map_err(|_| "启动状态锁已损坏")?;
@@ -353,7 +366,11 @@ async fn spawn_launcher(
     }
 }
 
-async fn wait_for_backend_launch(helper_port: u16) -> Result<(), String> {
+async fn wait_for_backend_launch(
+    helper_port: u16,
+    child: &mut tokio::process::Child,
+    mut stderr: Option<&mut tokio::process::ChildStderr>,
+) -> Result<(), String> {
     let deadline = std::time::Instant::now() + MANAGER_LAUNCH_TIMEOUT;
     loop {
         let helper_reachable = codex_pilot_core::ports::can_connect_loopback_port(helper_port);
@@ -370,6 +387,38 @@ async fn wait_for_backend_launch(helper_port: u16) -> Result<(), String> {
                 }),
             );
             return Ok(());
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stderr_text = read_launcher_stderr(stderr.take()).await;
+                let detail = concise_launcher_error(&stderr_text);
+                let message = if detail.is_empty() {
+                    format!("CodexPilot launcher 已退出：{status}")
+                } else {
+                    format!("CodexPilot launcher 已退出：{status}。{detail}")
+                };
+                let _ = append_diagnostic_event(
+                    "manager.launcher_exited_before_backend_ready",
+                    json!({
+                        "helper_port": helper_port,
+                        "status": status.to_string(),
+                        "stderr": stderr_text
+                    }),
+                );
+                return Err(message);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                let message = format!("检查 CodexPilot launcher 状态失败：{error}");
+                let _ = append_diagnostic_event(
+                    "manager.launcher_status_failed",
+                    json!({
+                        "helper_port": helper_port,
+                        "message": error.to_string()
+                    }),
+                );
+                return Err(message);
+            }
         }
         if std::time::Instant::now() >= deadline {
             let message = format!(
@@ -389,6 +438,30 @@ async fn wait_for_backend_launch(helper_port: u16) -> Result<(), String> {
         }
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
+}
+
+async fn read_launcher_stderr(stderr: Option<&mut tokio::process::ChildStderr>) -> String {
+    let Some(stderr) = stderr else {
+        return String::new();
+    };
+    let mut buffer = String::new();
+    let result =
+        tokio::time::timeout(Duration::from_secs(1), stderr.read_to_string(&mut buffer)).await;
+    match result {
+        Ok(Ok(_)) => buffer.trim().to_string(),
+        Ok(Err(error)) => format!("读取 launcher 错误输出失败：{error}"),
+        Err(_) => "读取 launcher 错误输出超时。".to_string(),
+    }
+}
+
+fn concise_launcher_error(stderr: &str) -> String {
+    stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 pub(crate) fn set_cached_codex_process_running(state: &ManagerState, codex_running: bool) {

@@ -23,6 +23,7 @@
   const timelineRootId = "codex-pilot-timeline";
   const actionGroupClass = "codex-pilot-row-actions";
   const actionButtonClass = "codex-pilot-row-action";
+  const rowTitleMaskClass = "codex-pilot-row-title-mask-target";
   const archiveActionClass = "codex-pilot-archive-action";
   const scrollStoreKey = "codexPilotThreadScroll";
   const serviceTierStoreKey = "codexPilotThreadFastMode";
@@ -30,7 +31,7 @@
   const serviceTierDraftTtlMs = 60000;
   const fastServiceTierValue = "priority";
   const fastMaxEntries = 120;
-  const fastDispatcherPatchVersion = "2";
+  const fastDispatcherPatchVersion = "3";
   const maxScrollEntries = 100;
   const selectors = {
     sidebarThread: "[data-app-action-sidebar-thread-id]",
@@ -70,7 +71,8 @@
     inlineActions: true,
     scrollRestore: true,
     pluginEntryUnlock: true,
-    forcePluginInstall: true
+    forcePluginInstall: true,
+    fastGlobalMode: true
   };
   let enhancementSettings = { ...defaultEnhancementSettings };
 
@@ -176,7 +178,8 @@
       inlineActions: source.inlineActions !== false,
       scrollRestore: source.scrollRestore !== false,
       pluginEntryUnlock: source.pluginEntryUnlock !== false,
-      forcePluginInstall: source.forcePluginInstall !== false
+      forcePluginInstall: source.forcePluginInstall !== false,
+      fastGlobalMode: source.fastGlobalMode !== false
     };
   }
 
@@ -202,11 +205,9 @@
   }
 
   function ensureStyles() {
-    if (document.getElementById("codex-pilot-style")) {
-      return;
-    }
-    const style = document.createElement("style");
+    const style = document.getElementById("codex-pilot-style") || document.createElement("style");
     style.id = "codex-pilot-style";
+    style.dataset.codexPilotVersion = scriptVersion;
     style.textContent = `
       #${rootId} {
         bottom: 18px;
@@ -271,6 +272,11 @@
 
       #${rootId} .codex-pilot-fast-toggle[data-mode="fast"] {
         color: #d6a21d;
+      }
+
+      #${rootId} .codex-pilot-fast-toggle[aria-disabled="true"] {
+        cursor: help;
+        opacity: 0.72;
       }
 
       #${rootId} .codex-pilot-fast-toggle svg {
@@ -488,8 +494,8 @@
         pointer-events: auto;
       }
 
-      [data-codex-pilot-row="true"]:hover [data-thread-title],
-      [data-codex-pilot-row="true"]:focus-within [data-thread-title] {
+      [data-codex-pilot-row="true"]:hover .${rowTitleMaskClass},
+      [data-codex-pilot-row="true"]:focus-within .${rowTitleMaskClass} {
         -webkit-mask-image: linear-gradient(90deg, transparent 0, transparent 42px, #000 58px, #000 100%);
         mask-image: linear-gradient(90deg, transparent 0, transparent 42px, #000 58px, #000 100%);
       }
@@ -655,7 +661,9 @@
         display: block;
       }
     `;
-    document.head.appendChild(style);
+    if (!style.parentElement) {
+      document.head.appendChild(style);
+    }
   }
 
   function detectCurrentSession() {
@@ -674,6 +682,14 @@
     const key = String(sessionId || "").trim();
     if (!key || key === "__proto__" || key === "prototype" || key === "constructor") return "";
     return /^[A-Za-z0-9_.-]{8,128}$/.test(key) ? key : "";
+  }
+
+  function validServiceTierPathSessionKey(sessionId) {
+    const key = validServiceTierSessionKey(sessionId);
+    if (!key) return "";
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)) return key;
+    if (/^thread-[A-Za-z0-9_.-]{8,}$/i.test(key)) return key;
+    return "";
   }
 
   function serviceTierSessionIdsInSidebar() {
@@ -698,8 +714,7 @@
   function currentServiceTierSessionKey() {
     const byUrl = validServiceTierSessionKey(sessionRefFromUrl()?.session_id);
     if (byUrl) return byUrl;
-    if (isCodexDraftRoute()) return "";
-    return validServiceTierSessionKey(sessionRefFromSelectedRow()?.session_id);
+    return "";
   }
 
   function currentServiceTierBindSessionKey() {
@@ -880,6 +895,14 @@
 
   function currentServiceTierUiState() {
     const sessionId = currentServiceTierSessionKey();
+    if (enhancementSettings.fastGlobalMode) {
+      return {
+        source: "global",
+        sessionId,
+        mode: "fast",
+        pendingBind: false
+      };
+    }
     const threadOverride = currentServiceTierThreadOverride(sessionId);
     if (threadOverride) {
       return {
@@ -984,6 +1007,9 @@
   }
 
   function currentServiceTierTooltip(state = currentServiceTierUiState()) {
+    if (state.source === "global") {
+      return "Pilot 已启用，所有对话使用 Fast";
+    }
     if (state.source === "draft") {
       return state.mode === "fast"
         ? "下一条新对话将使用 Fast"
@@ -995,6 +1021,9 @@
   }
 
   function currentServiceTierToast(state = currentServiceTierUiState()) {
+    if (state.source === "global") {
+      return "Pilot 已启用，所有对话使用 Fast";
+    }
     if (state.source === "draft") {
       return state.mode === "fast"
         ? "下一条新对话将使用 Fast"
@@ -1013,7 +1042,12 @@
       fastToggleButton.dataset.source = state.source;
       fastToggleButton.dataset.patchStatus = fastDispatcherPatchStatus;
       const disabled = fastDispatcherPatchStatus !== "ready";
-      fastToggleButton.disabled = disabled;
+      fastToggleButton.disabled = false;
+      if (disabled) {
+        fastToggleButton.setAttribute("aria-disabled", "true");
+      } else {
+        fastToggleButton.removeAttribute("aria-disabled");
+      }
       const label = disabled ? "Fast 暂不可用，正在连接 Codex 请求通道" : currentServiceTierTooltip(state);
       fastToggleButton.title = label;
       fastToggleButton.setAttribute("aria-label", label);
@@ -1031,6 +1065,16 @@
       return;
     }
     const state = currentServiceTierUiState();
+    if (enhancementSettings.fastGlobalMode) {
+      refreshFastToggleUi();
+      showToast(currentServiceTierToast(state), null);
+      reportRendererEvent("thread_fast_global_active", {
+        source: state.source,
+        session_id: state.sessionId,
+        mode: state.mode
+      });
+      return;
+    }
     const nextMode = state.mode === "fast" ? "standard" : "fast";
     const sessionId = currentServiceTierSessionKey();
     let wrote = false;
@@ -1089,7 +1133,11 @@
       const segments = url.pathname.split("/").map((segment) => segment.trim()).filter(Boolean);
       for (let index = segments.length - 1; index >= 0; index -= 1) {
         const decoded = decodeURIComponent(segments[index]);
-        const value = validServiceTierSessionKey(decoded);
+        const previous = index > 0 ? decodeURIComponent(segments[index - 1]) : "";
+        const explicitSessionContext = /^(session|sessions|conversation|conversations|thread|threads)$/i.test(previous);
+        const value = explicitSessionContext
+          ? validServiceTierSessionKey(decoded)
+          : validServiceTierPathSessionKey(decoded);
         if (value) return value;
       }
     } catch (_error) {
@@ -1476,10 +1524,12 @@
   }
 
   function attachRowActions(row) {
-    if (!row || row.querySelector(`.${actionGroupClass}`)) return;
+    if (!row) return;
     const session = sessionRefFromRow(row, "row");
     if (!session?.session_id) return;
     row.dataset.codexPilotRow = "true";
+    row.querySelector(selectors.threadTitle)?.classList?.add(rowTitleMaskClass);
+    if (row.querySelector(`.${actionGroupClass}`)) return;
     const group = document.createElement("div");
     group.className = actionGroupClass;
 
@@ -1841,6 +1891,14 @@
     const threadId = method === "thread/start"
       ? validServiceTierSessionKey(params.threadId || threadIdHint)
       : validServiceTierSessionKey(params.threadId || params.conversationId || threadIdHint || currentServiceTierSessionKey());
+    if (enhancementSettings.fastGlobalMode) {
+      return {
+        source: "global",
+        sessionId: threadId,
+        mode: "fast",
+        serviceTier: fastServiceTierValue
+      };
+    }
     const threadOverride = currentServiceTierThreadOverride(threadId);
     if (threadOverride) {
       return {
@@ -1866,8 +1924,8 @@
 
   function applyServiceTierRequestOverride(method, params, threadIdHint = "") {
     const override = serviceTierRequestOverrideForMethod(method, params, threadIdHint);
-    if (!override) return params;
-    const nextParams = { ...(params || {}), serviceTier: override.serviceTier };
+    if (!override) return { changed: false, params };
+    const nextParams = withServiceTierOverride(params, override.serviceTier);
     if (override.source === "draft") {
       const startToken = `${Date.now()}-${Math.random()}`;
       fastPendingBindStartToken = startToken;
@@ -1881,57 +1939,83 @@
       mode: override.mode,
       service_tier: override.serviceTier || "standard"
     });
+    return { changed: true, params: nextParams };
+  }
+
+  function withServiceTierOverride(params, serviceTier) {
+    const nextParams = { ...(params || {}), serviceTier };
+    if (Object.prototype.hasOwnProperty.call(nextParams, "service_tier")) {
+      nextParams.service_tier = serviceTier;
+    }
     return nextParams;
   }
 
-  function overrideServiceTierForMessage(message) {
-    if (!message || typeof message !== "object") return message;
+  function serviceTierOverrideResultForMessage(message) {
+    if (!message || typeof message !== "object") return { changed: false, message };
     if (message.type === "send-cli-request-for-host") {
       const method = String(message.method || "");
       if (!method || !message.params || typeof message.params !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_method_or_params" });
-        return message;
+        return { changed: false, message };
       }
-      const params = applyServiceTierRequestOverride(method, message.params);
-      return params === message.params ? message : { ...message, params };
+      const result = applyServiceTierRequestOverride(method, message.params);
+      return result.changed
+        ? { changed: true, message: { ...message, params: result.params } }
+        : { changed: false, message };
     }
     if (message.type === "mcp-request") {
       if (!message.request || typeof message.request !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_request" });
-        return message;
+        return { changed: false, message };
       }
       const method = String(message.request.method || "");
       if (!method || !message.request.params || typeof message.request.params !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_method_or_params" });
-        return message;
+        return { changed: false, message };
       }
-      const params = applyServiceTierRequestOverride(method, message.request.params);
-      return params === message.request.params ? message : { ...message, request: { ...message.request, params } };
+      const result = applyServiceTierRequestOverride(method, message.request.params);
+      return result.changed
+        ? { changed: true, message: { ...message, request: { ...message.request, params: result.params } } }
+        : { changed: false, message };
     }
     if (message.type === "worker-request") {
       if (!message.request || typeof message.request !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_request" });
-        return message;
+        return { changed: false, message };
       }
       const method = String(message.request.method || "");
       if (!method || !message.request.params || typeof message.request.params !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_method_or_params" });
-        return message;
+        return { changed: false, message };
       }
-      const params = applyServiceTierRequestOverride(method, message.request.params);
-      return params === message.request.params ? message : { ...message, request: { ...message.request, params } };
+      const result = applyServiceTierRequestOverride(method, message.request.params);
+      return result.changed
+        ? { changed: true, message: { ...message, request: { ...message.request, params: result.params } } }
+        : { changed: false, message };
     }
     if (message.type === "thread-prewarm-start") {
       if (!message.request || typeof message.request !== "object" || !message.request.params || typeof message.request.params !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_request_params" });
-        return message;
+        return { changed: false, message };
       }
-      const params = applyServiceTierRequestOverride("thread/start", message.request.params);
-      return params === message.request.params ? message : { ...message, request: { ...message.request, params } };
+      const result = applyServiceTierRequestOverride("thread/start", message.request.params);
+      return result.changed
+        ? { changed: true, message: { ...message, request: { ...message.request, params: result.params } } }
+        : { changed: false, message };
     }
     if (message.type === "start-conversation") {
+      if (enhancementSettings.fastGlobalMode) {
+        reportRendererEvent("thread_fast_request_override_applied", {
+          method: "start-conversation",
+          source: "global",
+          session_id: "",
+          mode: "fast",
+          service_tier: fastServiceTierValue
+        });
+        return { changed: true, message: withServiceTierOverride(message, fastServiceTierValue) };
+      }
       const draft = currentServiceTierDraft();
-      if (!draft) return message;
+      if (!draft) return { changed: false, message };
       const startToken = `${Date.now()}-${Math.random()}`;
       fastPendingBindStartToken = startToken;
       markServiceTierDraftPendingBind(startToken);
@@ -1943,29 +2027,39 @@
         mode: draft.mode,
         service_tier: isFastMode(draft.mode) ? fastServiceTierValue : "standard"
       });
-      return { ...message, serviceTier: isFastMode(draft.mode) ? fastServiceTierValue : null };
+      return { changed: true, message: withServiceTierOverride(message, isFastMode(draft.mode) ? fastServiceTierValue : null) };
     }
     if (message.type === "prewarm-thread-start-for-host") {
       if (!message.params || typeof message.params !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_params" });
-        return message;
+        return { changed: false, message };
       }
-      const params = applyServiceTierRequestOverride("thread/start", message.params);
-      return params === message.params ? message : { ...message, params };
+      const result = applyServiceTierRequestOverride("thread/start", message.params);
+      return result.changed
+        ? { changed: true, message: { ...message, params: result.params } }
+        : { changed: false, message };
     }
     if (message.type === "start-thread-for-host") {
-      const params = applyServiceTierRequestOverride("thread/start", message);
-      return params === message ? message : params;
+      const result = applyServiceTierRequestOverride("thread/start", message);
+      return result.changed
+        ? { changed: true, message: result.params }
+        : { changed: false, message };
     }
     if (message.type === "start-turn-for-host") {
       if (!message.params || typeof message.params !== "object") {
         reportRendererEvent("thread_fast_request_override_unsupported", { type: message.type, reason: "missing_params" });
-        return message;
+        return { changed: false, message };
       }
-      const params = applyServiceTierRequestOverride("turn/start", message.params, message.conversationId);
-      return params === message.params ? message : { ...message, params };
+      const result = applyServiceTierRequestOverride("turn/start", message.params, message.conversationId);
+      return result.changed
+        ? { changed: true, message: { ...message, params: result.params } }
+        : { changed: false, message };
     }
-    return message;
+    return { changed: false, message };
+  }
+
+  function overrideServiceTierForMessage(message) {
+    return serviceTierOverrideResultForMessage(message).message;
   }
 
   function installServiceTierTestApi() {
@@ -1998,27 +2092,93 @@
     };
   }
 
-  function installServiceTierDispatcherPatch() {
-    if (window.__codexPilotFastDispatcherPatchInstalled === fastDispatcherPatchVersion) {
-      fastDispatcherPatchInstalled = true;
-      fastDispatcherPatchStatus = "ready";
-      refreshFastToggleUi();
-      return;
+  function resolveServiceTierDispatcher(module) {
+    const exports = module && typeof module === "object" ? module : {};
+    const candidates = Object.entries(exports);
+    if (Object.prototype.hasOwnProperty.call(exports, "default")) {
+      candidates.unshift(["default", exports.default]);
     }
+    // 第一轮：只认「直接带 dispatchMessage 的导出」——即 vscode-api 的单例实例（Er=f）。
+    // 命中即返回，避免去对其它导出调用 getInstance 而产生副作用。
+    for (const [exportName, candidate] of candidates) {
+      if (
+        candidate &&
+        (typeof candidate === "object" || typeof candidate === "function") &&
+        typeof candidate.dispatchMessage === "function"
+      ) {
+        return { dispatcher: candidate, exportName };
+      }
+    }
+    // 第二轮：退回 getInstance 工厂解析（旧版构建里 dispatcher 以类形式导出）。
+    for (const [exportName, candidate] of candidates) {
+      const dispatcher = dispatcherFromCandidate(candidate);
+      if (dispatcher) return { dispatcher, exportName };
+    }
+    return null;
+  }
+
+  function dispatcherFromCandidate(candidate) {
+    if (!candidate || (typeof candidate !== "object" && typeof candidate !== "function")) return null;
+    if (typeof candidate.dispatchMessage === "function") return candidate;
+    const getInstance = candidate.getInstance;
+    if (typeof getInstance !== "function") return null;
+    if (!candidateLooksLikeDispatcherFactory(candidate)) return null;
+    try {
+      const instance = getInstance.call(candidate);
+      return instance && typeof instance.dispatchMessage === "function" ? instance : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function candidateLooksLikeDispatcherFactory(candidate) {
+    if (!candidate || (typeof candidate !== "object" && typeof candidate !== "function")) return false;
+    if (typeof candidate.prototype?.dispatchMessage === "function") return true;
+    try {
+      return Function.prototype.toString.call(candidate).includes("dispatchMessage");
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function installServiceTierDispatcherPatch() {
     if (fastDispatcherPatchInstalled) return;
     if (fastDispatcherPatchPromise) return;
     fastDispatcherPatchStatus = "loading";
     refreshFastToggleUi();
     fastDispatcherPatchPromise = Promise.resolve().then(async () => {
       try {
-        const module = await loadCodexAppModule("setting-storage-");
-        const dispatcherClass = typeof module.v === "function" && String(module.v).includes("dispatchMessage") ? module.v : null;
-        const dispatcher = dispatcherClass?.getInstance?.();
-        if (!dispatcher || typeof dispatcher.dispatchMessage !== "function") {
-          throw new Error("Codex dispatcher unavailable");
+        const module = await loadCodexAppModule("vscode-api-");
+        if (!isActiveBoot() || !enhancementSettings.enabled) {
+          fastDispatcherPatchInstalled = false;
+          fastDispatcherPatchStatus = "unavailable";
+          fastDispatcherPatchPromise = null;
+          refreshFastToggleUi();
+          return;
         }
-        const originalDispatch = dispatcher.__codexPilotOriginalDispatchMessage || dispatcher.dispatchMessage.bind(dispatcher);
-        if (dispatcher.__codexPilotFastPatchVersion === fastDispatcherPatchVersion) {
+        const resolved = resolveServiceTierDispatcher(module);
+        const dispatcher = resolved?.dispatcher;
+        if (!dispatcher) {
+          const exportNames = Object.keys(module || {}).slice(0, 16).join(",");
+          throw new Error(`Codex dispatcher unavailable: no dispatcher export${exportNames ? ` (${exportNames})` : ""}`);
+        }
+        const existingPatchActive = hasActiveServiceTierDispatcherPatch(dispatcher);
+        const originalDispatch = existingPatchActive && typeof dispatcher.__codexPilotOriginalDispatchMessage === "function"
+          ? dispatcher.__codexPilotOriginalDispatchMessage
+          : dispatcher.dispatchMessage.bind(dispatcher);
+        if (!existingPatchActive) {
+          clearServiceTierDispatcherPatchMetadata(dispatcher);
+        }
+        if (
+          dispatcher.__codexPilotFastPatchVersion === fastDispatcherPatchVersion &&
+          dispatcher.__codexPilotFastPatchOwnerBootId === bootId &&
+          existingPatchActive
+        ) {
+          rememberServiceTierDispatcherPatch(
+            dispatcher,
+            originalDispatch,
+            dispatcher.__codexPilotFastPatchedDispatchMessage || dispatcher.dispatchMessage
+          );
           fastDispatcherPatchInstalled = true;
           fastDispatcherPatchStatus = "ready";
           window.__codexPilotFastDispatcherPatchInstalled = fastDispatcherPatchVersion;
@@ -2026,18 +2186,37 @@
           return;
         }
         dispatcher.__codexPilotOriginalDispatchMessage = originalDispatch;
-        dispatcher.dispatchMessage = (type, payload) => {
-          const message = overrideServiceTierForMessage({ ...(payload || {}), type });
-          const nextType = message?.type || type;
-          const { type: _type, ...nextPayload } = message || {};
+        const patchedDispatch = (type, payload) => {
+          if (!isActiveBoot() || !enhancementSettings.enabled) {
+            if (dispatcher.dispatchMessage === patchedDispatch) {
+              restoreServiceTierDispatcherPatch(dispatcher);
+            }
+            fastDispatcherPatchInstalled = false;
+            fastDispatcherPatchStatus = "unavailable";
+            return originalDispatch(type, payload);
+          }
+          if (!payload || typeof payload !== "object") {
+            return originalDispatch(type, payload);
+          }
+          const message = { ...payload, type };
+          const result = serviceTierOverrideResultForMessage(message);
+          if (!result.changed) {
+            return originalDispatch(type, payload);
+          }
+          const nextType = result.message?.type || type;
+          const { type: _type, ...nextPayload } = result.message || {};
           return originalDispatch(nextType, nextPayload);
         };
+        dispatcher.dispatchMessage = patchedDispatch;
         dispatcher.__codexPilotFastPatchVersion = fastDispatcherPatchVersion;
+        dispatcher.__codexPilotFastPatchOwnerBootId = bootId;
+        dispatcher.__codexPilotFastPatchedDispatchMessage = patchedDispatch;
+        rememberServiceTierDispatcherPatch(dispatcher, originalDispatch, patchedDispatch);
         fastDispatcherPatchInstalled = true;
         fastDispatcherPatchStatus = "ready";
         window.__codexPilotFastDispatcherPatchInstalled = fastDispatcherPatchVersion;
         refreshFastToggleUi();
-        reportRendererEvent("thread_fast_dispatcher_patch_installed", {});
+        reportRendererEvent("thread_fast_dispatcher_patch_installed", { export_name: resolved.exportName || "" });
       } catch (error) {
         fastDispatcherPatchStatus = "unavailable";
         reportRendererEvent("thread_fast_dispatcher_patch_failed", { message: String(error) });
@@ -2045,6 +2224,99 @@
         refreshFastToggleUi();
       }
     });
+  }
+
+  function hasActiveServiceTierDispatcherPatch(dispatcher) {
+    if (!dispatcher?.__codexPilotFastPatchVersion || typeof dispatcher.dispatchMessage !== "function") return false;
+    const patchedDispatch = dispatcher.__codexPilotFastPatchedDispatchMessage;
+    if (typeof patchedDispatch === "function") {
+      return dispatcher.dispatchMessage === patchedDispatch;
+    }
+    if (typeof dispatcher.__codexPilotOriginalDispatchMessage !== "function") return false;
+    const source = Function.prototype.toString.call(dispatcher.dispatchMessage);
+    return source.includes("overrideServiceTierForMessage")
+      || source.includes("serviceTierOverrideResultForMessage")
+      || source.includes("thread_fast_request_override");
+  }
+
+  function clearServiceTierDispatcherPatchMetadata(dispatcher) {
+    if (!dispatcher) return;
+    delete dispatcher.__codexPilotOriginalDispatchMessage;
+    delete dispatcher.__codexPilotFastPatchVersion;
+    delete dispatcher.__codexPilotFastPatchOwnerBootId;
+    delete dispatcher.__codexPilotFastPatchedDispatchMessage;
+    if (window.__codexPilotFastDispatcherPatch?.dispatcher === dispatcher) {
+      delete window.__codexPilotFastDispatcherPatch;
+    }
+    delete window.__codexPilotFastDispatcherPatchInstalled;
+  }
+
+  function rememberServiceTierDispatcherPatch(dispatcher, originalDispatch, patchedDispatch) {
+    if (!dispatcher || typeof originalDispatch !== "function") return;
+    window.__codexPilotFastDispatcherPatch = {
+      version: fastDispatcherPatchVersion,
+      ownerBootId: bootId,
+      dispatcher,
+      originalDispatch,
+      patchedDispatch
+    };
+  }
+
+  function restoreServiceTierDispatcherPatch(dispatcher, options = {}) {
+    const registry = window.__codexPilotFastDispatcherPatch;
+    const registered = Boolean(dispatcher && registry?.dispatcher === dispatcher);
+    const ownerBootId = String(dispatcher?.__codexPilotFastPatchOwnerBootId || (registered ? registry?.ownerBootId : "") || "");
+    const expectedOwnerBootId = String(options.ownerBootId || "");
+    const allowAnyOwner = options.allowAnyOwner === true;
+    if (expectedOwnerBootId && ownerBootId && ownerBootId !== expectedOwnerBootId) {
+      return false;
+    }
+    if (!expectedOwnerBootId && !allowAnyOwner && ownerBootId && ownerBootId !== bootId) {
+      return false;
+    }
+    const originalDispatch = dispatcher?.__codexPilotOriginalDispatchMessage
+      || (registered ? registry?.originalDispatch : null);
+    const activePatch = hasActiveServiceTierDispatcherPatch(dispatcher)
+      || (registered && dispatcher?.dispatchMessage === registry?.patchedDispatch);
+    if (
+      !dispatcher ||
+      typeof originalDispatch !== "function" ||
+      !activePatch
+    ) {
+      if (registered && (allowAnyOwner || !ownerBootId || ownerBootId === bootId || ownerBootId === expectedOwnerBootId)) {
+        delete window.__codexPilotFastDispatcherPatch;
+      }
+      return false;
+    }
+    dispatcher.dispatchMessage = originalDispatch;
+    clearServiceTierDispatcherPatchMetadata(dispatcher);
+    delete window.__codexPilotFastDispatcherPatchInstalled;
+    if (registered) {
+      delete window.__codexPilotFastDispatcherPatch;
+    }
+    return true;
+  }
+
+  async function uninstallServiceTierDispatcherPatch(reason = "disabled") {
+    try {
+      const registry = window.__codexPilotFastDispatcherPatch;
+      const canRestoreRegisteredPatch = isActiveBoot() && !enhancementSettings.enabled;
+      if (!restoreServiceTierDispatcherPatch(registry?.dispatcher, { allowAnyOwner: canRestoreRegisteredPatch })) {
+        const module = await loadCodexAppModule("vscode-api-");
+        if (!isActiveBoot() || enhancementSettings.enabled) {
+          return;
+        }
+        const dispatcher = resolveServiceTierDispatcher(module)?.dispatcher;
+        restoreServiceTierDispatcherPatch(dispatcher, { allowAnyOwner: true });
+      }
+    } catch (error) {
+      reportRendererEvent("thread_fast_dispatcher_patch_uninstall_failed", { reason, message: String(error) });
+    } finally {
+      fastDispatcherPatchInstalled = false;
+      fastDispatcherPatchStatus = "unavailable";
+      fastDispatcherPatchPromise = null;
+      refreshFastToggleUi();
+    }
   }
 
   function installScrollRestore() {
@@ -2543,15 +2815,42 @@
     installServiceTierTestApi();
     refreshFastToggleUi();
     if (typeof MutationObserver === "function") {
+      // 这些处理器自身会改 body 子树（插入时间线 / 行内操作 / fast 按钮等），而 observer 又监听整棵
+      // body 子树的 childList。若在回调里同步跑处理器，我们自己造成的变更会立刻再次触发 observer，
+      // 形成自反馈死循环、渲染进程 100% CPU 卡死（新建对话冷启动时必现）。这里两道防线：
+      //   ① 合并一帧内的多次变更，最多跑一次（debounce）；
+      //   ② 跑处理器期间先 disconnect，使我们自己造成的变更不被观测，从根上切断自反馈。
+      // 注意时间线用 renderTimeline() 直接同步渲染，而不是 refreshTimelineSoon() 的延时渲染，
+      // 以保证所有 DOM 变更都落在 disconnect 窗口内。
+      let refreshScheduled = false;
       const observer = new MutationObserver(() => {
         if (!isActiveBoot()) {
           observer.disconnect();
           return;
         }
-        applyPluginPatches();
-        if (enhancementSettings.inlineActions) refreshSessionActions();
-        if (enhancementSettings.timeline) refreshTimelineSoon();
-        refreshFastToggleUi();
+        if (refreshScheduled) return;
+        refreshScheduled = true;
+        const runRefresh = () => {
+          refreshScheduled = false;
+          if (!isActiveBoot()) {
+            observer.disconnect();
+            return;
+          }
+          observer.disconnect();
+          try {
+            applyPluginPatches();
+            if (enhancementSettings.inlineActions) refreshSessionActions();
+            if (enhancementSettings.timeline) renderTimeline();
+            refreshFastToggleUi();
+          } finally {
+            if (isActiveBoot()) {
+              observer.observe(document.body, { childList: true, subtree: true });
+            }
+          }
+        };
+        // 用 ~250ms 节流而非逐帧（rAF）：Codex 自身的动画元素每帧都在变动，逐帧跑处理器会让
+        // 冷启动期 CPU 飙到接近满载、稳态也无谓地每帧重写 fast 按钮。250ms 反应延迟无感，CPU 大降。
+        window.setTimeout(runRefresh, 250);
       });
       observer.observe(document.body, { childList: true, subtree: true });
     }
@@ -2573,7 +2872,11 @@
 
   async function bootCodexPilot() {
     await loadEnhancementSettings();
+    if (!isActiveBoot()) {
+      return;
+    }
     if (!enhancementSettings.enabled) {
+      await uninstallServiceTierDispatcherPatch("enhancement_disabled");
       reportRendererEvent("enhancement_disabled", {});
       return;
     }

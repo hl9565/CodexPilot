@@ -132,6 +132,7 @@ export type EnhancementSettings = {
   scrollRestore: boolean;
   pluginEntryUnlock: boolean;
   forcePluginInstall: boolean;
+  fastGlobalMode: boolean;
 };
 
 export type ViewId = "overview" | "launch" | "sessions" | "diagnostics";

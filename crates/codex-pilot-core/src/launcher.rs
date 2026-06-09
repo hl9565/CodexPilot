@@ -9,6 +9,11 @@ use tokio::process::Child;
 // manager 放弃前完成注入并写入运行状态。
 const INJECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 const INJECTION_RETRY_DELAY_MS: u64 = 500;
+const BACKEND_MONITOR_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+// Codex 在自更新重启、单实例接管，或加载完成后关闭 CDP 端口时，调试端口会短暂消失，
+// 但进程仍然存活。必须以 Codex 进程是否在运行作为退出判据，并要求连续多次探测都查不到
+// 进程才判定真正退出，避免把瞬时空窗误判为退出而拆掉后端、让 manager 弹回启动界面。
+const BACKEND_MONITOR_MISSED_PROCESS_PROBES: u8 = 5;
 
 #[derive(Debug, Clone)]
 pub struct LaunchOptions {
@@ -75,6 +80,7 @@ pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
     let app_dir = crate::app_paths::resolve_codex_app_dir(options.app_dir.as_deref())
         .ok_or_else(|| anyhow::anyhow!("Codex App directory not found"))?;
     let debug_port = options.debug_port;
+    crate::status::clear_status()?;
     if helper_status(options.helper_port).await.is_ok() {
         let _ = crate::diagnostic_log::append(
             "launcher.helper_already_running_skip_inject",
@@ -107,6 +113,7 @@ pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
                     status: "running".to_string(),
                     version: crate::version::VERSION.to_string(),
                 })?;
+                monitor_backend_until_codex_exits(helper, debug_port, helper_port).await;
                 return Ok(());
             }
             Err(error) => {
@@ -155,9 +162,94 @@ pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<()> {
         status: "running".to_string(),
         version: crate::version::VERSION.to_string(),
     })?;
-    let _ = child.wait().await;
-    helper.shutdown().await;
+    monitor_backend_until_codex_exits(helper, debug_port, helper_port).await;
+    match child.try_wait() {
+        Ok(Some(status)) => {
+            let _ = crate::diagnostic_log::append(
+                "launcher.wrapper_already_exited",
+                serde_json::json!({
+                    "debug_port": debug_port,
+                    "helper_port": helper_port,
+                    "status": status.to_string()
+                }),
+            );
+        }
+        Ok(None) => {
+            let _ = crate::diagnostic_log::append(
+                "launcher.child_still_running_after_debug_port_lost",
+                serde_json::json!({
+                    "debug_port": debug_port,
+                    "helper_port": helper_port
+                }),
+            );
+        }
+        Err(error) => {
+            let _ = crate::diagnostic_log::append(
+                "launcher.wrapper_status_failed",
+                serde_json::json!({
+                    "debug_port": debug_port,
+                    "helper_port": helper_port,
+                    "message": error.to_string()
+                }),
+            );
+        }
+    }
     Ok(())
+}
+
+async fn monitor_backend_until_codex_exits(
+    helper: crate::helper::HelperRuntime,
+    debug_port: u16,
+    helper_port: u16,
+) {
+    let _ = crate::diagnostic_log::append(
+        "launcher.backend_monitor_start",
+        serde_json::json!({
+            "debug_port": debug_port,
+            "helper_port": helper_port
+        }),
+    );
+    let mut missed_process_probes = 0_u8;
+    loop {
+        // 以 Codex 进程是否存活作为唯一退出判据；调试端口可能在 Codex 自更新重启、
+        // 单实例接管或首屏加载完成后短暂消失，但只要进程还在就不应拆掉后端。
+        if is_codex_process_running().await {
+            missed_process_probes = 0;
+        } else {
+            missed_process_probes = missed_process_probes.saturating_add(1);
+            if missed_process_probes >= BACKEND_MONITOR_MISSED_PROCESS_PROBES {
+                let _ = crate::diagnostic_log::append(
+                    "launcher.codex_process_exited",
+                    serde_json::json!({
+                        "debug_port": debug_port,
+                        "helper_port": helper_port,
+                        "missed_probes": missed_process_probes,
+                        "debug_port_reachable": crate::ports::can_connect_loopback_port(debug_port)
+                    }),
+                );
+                break;
+            }
+        }
+        tokio::time::sleep(BACKEND_MONITOR_INTERVAL).await;
+    }
+    if let Err(error) = crate::status::clear_status() {
+        let _ = crate::diagnostic_log::append(
+            "launcher.clear_status_failed",
+            serde_json::json!({
+                "debug_port": debug_port,
+                "helper_port": helper_port,
+                "message": error.to_string()
+            }),
+        );
+    }
+    helper.shutdown().await;
+    let _ = crate::diagnostic_log::append(
+        "launcher.backend_monitor_stopped",
+        serde_json::json!({
+            "debug_port": debug_port,
+            "helper_port": helper_port
+        }),
+    );
 }
 
 async fn helper_status(port: u16) -> anyhow::Result<HelperStatus> {
@@ -206,7 +298,6 @@ pub fn build_macos_open_command(app_dir: &Path, debug_port: u16) -> Vec<String> 
     let mut command = vec![
         "open".to_string(),
         "-n".to_string(),
-        "-W".to_string(),
         "-a".to_string(),
         app_dir.to_string_lossy().to_string(),
         "--args".to_string(),
@@ -327,6 +418,7 @@ mod tests {
 
         assert_eq!(command[0], "open");
         assert!(command.contains(&"-n".to_string()));
+        assert!(!command.contains(&"-W".to_string()));
         assert!(command.contains(&"--remote-debugging-port=9688".to_string()));
     }
 
