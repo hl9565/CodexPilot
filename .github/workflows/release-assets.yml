@@ -3,6 +3,12 @@ name: Release assets
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build assets for, for example v1.3.2"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -25,7 +31,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -40,16 +46,13 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
-      - name: Install Python packaging dependencies
-        run: python3 -m pip install Pillow
-
       - name: Install frontend dependencies
         working-directory: apps/codex-pilot-manager
         run: npm ci
 
       - name: Build macOS DMG
         run: |
-          version="${{ github.event.release.tag_name }}"
+          version="${{ github.event.release.tag_name || inputs.tag }}"
           export VERSION="${version#v}"
           export TARGET_TRIPLE="${{ matrix.target }}"
           scripts/package-macos.sh
@@ -57,8 +60,9 @@ jobs:
       - name: Upload macOS DMG
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
           files: dist/macos/*.dmg
+          overwrite_files: true
 
   windows-installer:
     runs-on: windows-latest
@@ -66,7 +70,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -88,12 +92,13 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $version = "${{ github.event.release.tag_name }}" -replace '^[vV]', ''
+          $version = "${{ github.event.release.tag_name || inputs.tag }}" -replace '^[vV]', ''
           $env:VERSION = $version
           .\scripts\package-windows.ps1
 
       - name: Upload Windows installer
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
           files: dist/windows/*.exe
+          overwrite_files: true

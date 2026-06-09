@@ -151,7 +151,12 @@ read -r -p "按回车键关闭窗口..."
 SCRIPT
 chmod +x "$STAGE_DIR/已损坏修复.command"
 
-if [[ -f "$REPAIR_ICON_GENERATOR" ]]; then
+if [[ -f "$REPAIR_ICON_GENERATOR" ]] \
+  && python3 -c 'import PIL' >/dev/null 2>&1 \
+  && command -v sips >/dev/null 2>&1 \
+  && command -v DeRez >/dev/null 2>&1 \
+  && command -v Rez >/dev/null 2>&1 \
+  && command -v SetFile >/dev/null 2>&1; then
   REPAIR_ICON_PNG="$STAGE_DIR/repair-tool-1024.png"
   REPAIR_ICON_RSRC="$STAGE_DIR/repair-tool.rsrc"
   python3 "$REPAIR_ICON_GENERATOR" "$REPAIR_ICON_PNG"
@@ -160,6 +165,8 @@ if [[ -f "$REPAIR_ICON_GENERATOR" ]]; then
   Rez -append "$REPAIR_ICON_RSRC" -o "$STAGE_DIR/已损坏修复.command" >/dev/null
   SetFile -a C "$STAGE_DIR/已损坏修复.command"
   rm -f "$REPAIR_ICON_PNG" "$REPAIR_ICON_RSRC"
+else
+  echo "跳过修复工具图标装饰：缺少 Pillow 或 macOS 资源工具。" >&2
 fi
 
 mkdir -p "$STAGE_DIR/.background"
