@@ -8,6 +8,55 @@ permissions:
   contents: write
 
 jobs:
+  macos-dmg:
+    name: macOS DMG (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - arch: x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Install frontend dependencies
+        working-directory: apps/codex-pilot-manager
+        run: npm ci
+
+      - name: Build macOS DMG
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          export VERSION="${version#v}"
+          export TARGET_TRIPLE="${{ matrix.target }}"
+          scripts/package-macos.sh
+
+      - name: Upload macOS DMG
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: dist/macos/*.dmg
+
   windows-installer:
     runs-on: windows-latest
     steps:
